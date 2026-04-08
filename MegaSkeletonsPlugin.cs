@@ -3,6 +3,7 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -15,8 +16,9 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.0.5";
+        public const string PluginVersion = "1.0.6";
 
+        public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
         private static Harmony _harmony;
         private static ConfigFile _config;
@@ -39,6 +41,7 @@ namespace MegaSkeletons
 
         void Awake()
         {
+            Instance = this;
             _logger = Logger;
             _config = Config;
 
@@ -144,11 +147,24 @@ namespace MegaSkeletons
         private bool _healthApplied;
         private float _healTimer;
 
+        // ZDO key to prevent HP stacking across respawns
+        private static readonly int s_megaHpBuffed = "mega_hp_buffed".GetStableHashCode();
+
         void Awake()
         {
             _character = GetComponent<Character>();
             _monsterAI = GetComponent<MonsterAI>();
             _animator = GetComponentInChildren<Animator>();
+        }
+
+        void OnDestroy()
+        {
+            // Diagnostic: log when tamed skeletons are destroyed (helps debug dungeon disappearance)
+            if (_character != null && _character.IsTamed())
+            {
+                MegaSkeletonsPlugin.LogAlways($"[SkeletonBuff] Tamed skeleton DESTROYED: '{_character.gameObject?.name}' IsDead={_character.IsDead()} HP={_character.GetHealth()}");
+                MegaSkeletonsPlugin.LogAlways($"[SkeletonBuff] Destroy stack: {Environment.StackTrace}");
+            }
         }
 
         void Update()
@@ -164,6 +180,7 @@ namespace MegaSkeletons
             if (player == null) return;
 
             // Health multiplier — apply once via ZDO (m_health field is dead after Awake)
+            // Uses ZDO flag to prevent stacking across respawns (each respawn would re-multiply)
             if (!_healthApplied)
             {
                 _healthApplied = true;
@@ -173,11 +190,20 @@ namespace MegaSkeletons
                     var nview = _character.GetComponent<ZNetView>();
                     if (nview != null && nview.IsValid())
                     {
-                        float newMax = _character.GetMaxHealth() * mult;
-                        nview.GetZDO().Set(ZDOVars.s_maxHealth, newMax);
-                        nview.GetZDO().Set(ZDOVars.s_health, newMax);
-                        _character.m_health = newMax; // sync field for any direct reads
-                        MegaSkeletonsPlugin.Log($"[SkeletonBuff] Health buffed to {newMax} ({mult}x)");
+                        var zdo = nview.GetZDO();
+                        if (zdo.GetBool(s_megaHpBuffed))
+                        {
+                            MegaSkeletonsPlugin.Log($"[SkeletonBuff] Already HP-buffed (ZDO flag), skipping");
+                        }
+                        else
+                        {
+                            float newMax = _character.GetMaxHealth() * mult;
+                            zdo.Set(ZDOVars.s_maxHealth, newMax);
+                            zdo.Set(ZDOVars.s_health, newMax);
+                            _character.m_health = newMax;
+                            zdo.Set(s_megaHpBuffed, true);
+                            MegaSkeletonsPlugin.Log($"[SkeletonBuff] Health buffed to {newMax} ({mult}x)");
+                        }
                     }
                 }
             }
@@ -350,16 +376,42 @@ namespace MegaSkeletons
 
         /// <summary>
         /// Respawn saved skeletons near the player after teleport completes.
+        /// Uses a delayed coroutine to let dungeons fully load before spawning.
         /// </summary>
         public static void RespawnSkeletons(Player player)
         {
             if (!_waitingToRespawn || _savedSkeletons.Count == 0) return;
 
             _waitingToRespawn = false;
-            MegaSkeletonsPlugin.LogAlways($"[Persistence] Respawning {_savedSkeletons.Count} skeleton(s)");
+
+            // Copy the list and clear immediately — coroutine uses its own copy
+            var toRespawn = new List<SavedSkeleton>(_savedSkeletons);
+            _savedSkeletons.Clear();
+
+            // Delay spawn by 3 seconds to let dungeon environments fully load.
+            // Without this, skeletons spawned inside dungeons can fall through
+            // floors or get cleaned up by zone management before rooms settle.
+            MegaSkeletonsPlugin.LogAlways($"[Persistence] Waiting 3s for environment to load before respawning {toRespawn.Count} skeleton(s)...");
+            MegaSkeletonsPlugin.Instance.StartCoroutine(RespawnCoroutine(player, toRespawn));
+        }
+
+        private static IEnumerator RespawnCoroutine(Player player, List<SavedSkeleton> skeletons)
+        {
+            yield return new WaitForSeconds(3f);
+
+            if (player == null)
+            {
+                MegaSkeletonsPlugin.LogAlways("[Persistence] Player gone after delay — aborting respawn");
+                yield break;
+            }
+
+            MegaSkeletonsPlugin.LogAlways($"[Persistence] Respawning {skeletons.Count} skeleton(s)");
+
+            // ZDO hash for the HP-buff flag (same as SkeletonBuff uses)
+            int megaHpBuffed = "mega_hp_buffed".GetStableHashCode();
 
             int index = 0;
-            foreach (var saved in _savedSkeletons)
+            foreach (var saved in skeletons)
             {
                 var prefab = ZNetScene.instance.GetPrefab(saved.PrefabName);
                 if (prefab == null)
@@ -368,11 +420,11 @@ namespace MegaSkeletons
                     continue;
                 }
 
-                // Spawn near player with slight offset to avoid stacking
-                // Use player's Y directly — GetGroundHeight returns terrain surface height
-                // which is wrong inside dungeons (underground cave systems)
-                float angle = index * (360f / _savedSkeletons.Count) * Mathf.Deg2Rad;
-                Vector3 offset = new Vector3(Mathf.Cos(angle) * 2f, 0f, Mathf.Sin(angle) * 2f);
+                // Spawn near player with offset to avoid stacking.
+                // +1.5 Y offset ensures skeletons spawn above the floor in dungeons
+                // (gravity will settle them down; prevents clipping through dungeon geometry).
+                float angle = index * (360f / skeletons.Count) * Mathf.Deg2Rad;
+                Vector3 offset = new Vector3(Mathf.Cos(angle) * 2f, 1.5f, Mathf.Sin(angle) * 2f);
                 Vector3 spawnPos = player.transform.position + offset;
 
                 var go = UnityEngine.Object.Instantiate(prefab, spawnPos, Quaternion.identity);
@@ -401,26 +453,23 @@ namespace MegaSkeletons
                         tameMethod?.Invoke(tameable, null);
                     }
 
-                    // Restore health — need a frame delay for SetupMaxHealth to run
-                    // Apply health buff multiplier on the new max health
-                    float mult = MegaSkeletonsPlugin.SkeletonHealthMultiplier.Value;
-                    float newMax = (mult > 1f) ? saved.MaxHealth : character.GetMaxHealth();
-                    zdo.Set(ZDOVars.s_maxHealth, newMax);
-                    zdo.Set(ZDOVars.s_health, Mathf.Min(saved.Health, newMax));
+                    // Restore health — mark as already buffed to prevent SkeletonBuff
+                    // from applying the multiplier again (HP stacking bug)
+                    zdo.Set(ZDOVars.s_maxHealth, saved.MaxHealth);
+                    zdo.Set(ZDOVars.s_health, Mathf.Min(saved.Health, saved.MaxHealth));
+                    zdo.Set(megaHpBuffed, true);
                     if (character != null)
-                        character.m_health = newMax;
+                        character.m_health = saved.MaxHealth;
 
                     // Set follow target to player
                     if (monsterAI != null)
                         monsterAI.SetFollowTarget(player.gameObject);
 
-                    MegaSkeletonsPlugin.LogAlways($"[Persistence] Respawned {saved.PrefabName} at {spawnPos}, HP={saved.Health}/{newMax}");
+                    MegaSkeletonsPlugin.LogAlways($"[Persistence] Respawned {saved.PrefabName} at {spawnPos}, HP={saved.Health}/{saved.MaxHealth}");
                 }
 
                 index++;
             }
-
-            _savedSkeletons.Clear();
         }
 
         /// <summary>
