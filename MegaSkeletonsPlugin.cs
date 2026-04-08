@@ -15,7 +15,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.0.0";
+        public const string PluginVersion = "1.0.1";
 
         internal static ManualLogSource _logger;
         private static Harmony _harmony;
@@ -98,6 +98,12 @@ namespace MegaSkeletons
         {
             if (DebugMode != null && DebugMode.Value)
                 _logger.LogInfo(message);
+        }
+
+        /// <summary>Always log (not gated by DebugMode) — for critical persistence events.</summary>
+        internal static void LogAlways(string message)
+        {
+            _logger.LogInfo(message);
         }
     }
 
@@ -247,7 +253,9 @@ namespace MegaSkeletons
         }
 
         /// <summary>
-        /// Find all tamed skeletons following the local player within radius.
+        /// Find all tamed skeletons near the local player within radius.
+        /// Does NOT require follow target — Dead Raiser skeletons may follow
+        /// via pheromone/tame system rather than explicit SetFollowTarget.
         /// </summary>
         public static List<Character> GetNearbyTamedSkeletons(Player player, float radius)
         {
@@ -266,14 +274,7 @@ namespace MegaSkeletons
                 float dist = Vector3.Distance(playerPos, character.transform.position);
                 if (dist > radius) continue;
 
-                // Check it's following the player (MonsterAI follow target)
-                var monsterAI = character.GetComponent<MonsterAI>();
-                if (monsterAI != null)
-                {
-                    var followTarget = monsterAI.GetFollowTarget();
-                    if (followTarget == null || followTarget != player.gameObject) continue;
-                }
-
+                MegaSkeletonsPlugin.Log($"[Persistence] Found tamed skeleton: '{character.gameObject.name}' at dist={dist:F1}");
                 results.Add(character);
             }
 
@@ -310,7 +311,7 @@ namespace MegaSkeletons
                 };
 
                 _savedSkeletons.Add(saved);
-                MegaSkeletonsPlugin.Log($"[Persistence] Saved skeleton: {prefabName}, HP={saved.Health}/{saved.MaxHealth}, Lvl={saved.Level}");
+                MegaSkeletonsPlugin.LogAlways($"[Persistence] Saved skeleton: {prefabName}, HP={saved.Health}/{saved.MaxHealth}, Lvl={saved.Level}");
 
                 // Destroy via ZNetScene so it's properly cleaned up across the network
                 nview.Destroy();
@@ -319,7 +320,11 @@ namespace MegaSkeletons
             if (_savedSkeletons.Count > 0)
             {
                 _waitingToRespawn = true;
-                MegaSkeletonsPlugin.Log($"[Persistence] Saved {_savedSkeletons.Count} skeleton(s) for teleport");
+                MegaSkeletonsPlugin.LogAlways($"[Persistence] Saved {_savedSkeletons.Count} skeleton(s) for teleport");
+            }
+            else
+            {
+                MegaSkeletonsPlugin.LogAlways($"[Persistence] No tamed skeletons found within {radius}m radius");
             }
         }
 
@@ -331,7 +336,7 @@ namespace MegaSkeletons
             if (!_waitingToRespawn || _savedSkeletons.Count == 0) return;
 
             _waitingToRespawn = false;
-            MegaSkeletonsPlugin.Log($"[Persistence] Respawning {_savedSkeletons.Count} skeleton(s)");
+            MegaSkeletonsPlugin.LogAlways($"[Persistence] Respawning {_savedSkeletons.Count} skeleton(s)");
 
             int index = 0;
             foreach (var saved in _savedSkeletons)
@@ -392,7 +397,7 @@ namespace MegaSkeletons
                     if (monsterAI != null)
                         monsterAI.SetFollowTarget(player.gameObject);
 
-                    MegaSkeletonsPlugin.Log($"[Persistence] Respawned {saved.PrefabName} at {spawnPos}, HP={saved.Health}/{newMax}");
+                    MegaSkeletonsPlugin.LogAlways($"[Persistence] Respawned {saved.PrefabName} at {spawnPos}, HP={saved.Health}/{newMax}");
                 }
 
                 index++;
@@ -420,7 +425,7 @@ namespace MegaSkeletons
         public static void Prefix(Player __instance)
         {
             if (__instance != Player.m_localPlayer) return;
-            MegaSkeletonsPlugin.Log("[Persistence] Player teleport starting — saving skeletons");
+            MegaSkeletonsPlugin.LogAlways("[Persistence] Player.TeleportTo fired — saving skeletons");
             SkeletonPersistence.SaveAndDestroySkeletons(__instance);
         }
     }
@@ -446,7 +451,7 @@ namespace MegaSkeletons
             // Detect transition from teleporting → not teleporting
             if (_wasTeleporting && !isTeleporting)
             {
-                MegaSkeletonsPlugin.Log("[Persistence] Teleport complete — respawning skeletons");
+                MegaSkeletonsPlugin.LogAlways("[Persistence] Teleport complete — respawning skeletons");
                 SkeletonPersistence.RespawnSkeletons(__instance);
             }
 

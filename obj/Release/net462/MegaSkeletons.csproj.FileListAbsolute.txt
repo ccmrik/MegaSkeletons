@@ -104,3 +104,4 @@ C:\Users\Rik\OneDrive\Valheim Mods\MegaSkeletons\bin\Release\net462\System.Xml.X
 C:\Users\Rik\OneDrive\Valheim Mods\MegaSkeletons\obj\Release\net462\MegaSkel.14D0BDB2.Up2Date
 C:\Users\Rik\OneDrive\Valheim Mods\MegaSkeletons\obj\Release\net462\MegaSkeletons.dll
 C:\Users\Rik\OneDrive\Valheim Mods\MegaSkeletons\obj\Release\net462\MegaSkeletons.pdb
+C:\Users\Rik\OneDrive\Valheim Mods\MegaSkeletons\obj\Release\net462\MegaSkeletons.sourcelink.json
