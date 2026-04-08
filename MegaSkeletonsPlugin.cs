@@ -1,0 +1,478 @@
+using BepInEx;
+using BepInEx.Configuration;
+using BepInEx.Logging;
+using HarmonyLib;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using UnityEngine;
+
+namespace MegaSkeletons
+{
+    [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
+    public class MegaSkeletonsPlugin : BaseUnityPlugin
+    {
+        public const string PluginGUID = "com.rik.megaskeletons";
+        public const string PluginName = "Mega Skeletons";
+        public const string PluginVersion = "1.0.0";
+
+        internal static ManualLogSource _logger;
+        private static Harmony _harmony;
+        private static ConfigFile _config;
+        private static FileSystemWatcher _configWatcher;
+
+        // Skeleton Buffs
+        public static ConfigEntry<bool> EnableSkeletonBuff;
+        public static ConfigEntry<float> SkeletonHealthMultiplier;
+        public static ConfigEntry<float> SkeletonHealPerSecond;
+        public static ConfigEntry<bool> EnableSkeletonSpeedMatch;
+        public static ConfigEntry<float> SkeletonSpeedMultiplier;
+        public static ConfigEntry<float> SkeletonAttackSpeedMultiplier;
+
+        // Skeleton Persistence
+        public static ConfigEntry<bool> EnableSkeletonPersistence;
+        public static ConfigEntry<float> SkeletonFollowRadius;
+
+        // Debug
+        public static ConfigEntry<bool> DebugMode;
+
+        void Awake()
+        {
+            _logger = Logger;
+            _config = Config;
+
+            // 1. Skeleton Buffs
+            EnableSkeletonBuff = Config.Bind("1. Skeleton Buffs", "Enable", true,
+                "Buffs summoned skeletons from the Dead Raiser (health, speed, attack speed, heal over time)");
+            SkeletonHealthMultiplier = Config.Bind("1. Skeleton Buffs", "HealthMultiplier", 10f,
+                new ConfigDescription("Health multiplier for summoned skeletons (vanilla ≈ 40 HP)", new AcceptableValueRange<float>(1f, 100f)));
+            SkeletonHealPerSecond = Config.Bind("1. Skeleton Buffs", "HealPerSecond", 5f,
+                new ConfigDescription("HP healed per second for summoned skeletons (0 = disabled)", new AcceptableValueRange<float>(0f, 100f)));
+            EnableSkeletonSpeedMatch = Config.Bind("1. Skeleton Buffs", "SpeedMatch", true,
+                "Match summoned skeleton walk/run speed to the player so they keep up");
+            SkeletonSpeedMultiplier = Config.Bind("1. Skeleton Buffs", "SpeedMultiplier", 1.5f,
+                new ConfigDescription("Speed multiplier on top of player speed matching (1.5 = 50% faster than player, helps them keep up during sprint)", new AcceptableValueRange<float>(1f, 5f)));
+            SkeletonAttackSpeedMultiplier = Config.Bind("1. Skeleton Buffs", "AttackSpeedMultiplier", 1f,
+                new ConfigDescription("Attack animation speed multiplier (1 = vanilla, 2 = double speed)", new AcceptableValueRange<float>(1f, 5f)));
+
+            // 2. Skeleton Persistence
+            EnableSkeletonPersistence = Config.Bind("2. Skeleton Persistence", "Enable", true,
+                "Summoned skeletons follow you through portals and dungeon entrances/exits");
+            SkeletonFollowRadius = Config.Bind("2. Skeleton Persistence", "FollowRadius", 30f,
+                new ConfigDescription("Max distance from player for skeletons to be teleported with you", new AcceptableValueRange<float>(5f, 100f)));
+
+            // 3. Debug
+            DebugMode = Config.Bind("3. Debug", "DebugMode", false,
+                "Enable verbose debug logging to BepInEx console/log");
+
+            // Config file watcher for live reload
+            SetupConfigWatcher();
+
+            _harmony = new Harmony(PluginGUID);
+            _harmony.PatchAll();
+
+            Log($"{PluginName} v{PluginVersion} loaded!");
+        }
+
+        void OnDestroy()
+        {
+            _harmony?.UnpatchSelf();
+            _configWatcher?.Dispose();
+        }
+
+        private void SetupConfigWatcher()
+        {
+            var configDir = Path.GetDirectoryName(Config.ConfigFilePath);
+            var configFile = Path.GetFileName(Config.ConfigFilePath);
+            _configWatcher = new FileSystemWatcher(configDir, configFile);
+            _configWatcher.Changed += (s, e) =>
+            {
+                Config.Reload();
+                Log("Config reloaded via file watcher");
+            };
+            _configWatcher.EnableRaisingEvents = true;
+        }
+
+        internal static void Log(string message)
+        {
+            if (DebugMode != null && DebugMode.Value)
+                _logger.LogInfo(message);
+        }
+    }
+
+    // ==================== SKELETON DETECTION ====================
+
+    [HarmonyPatch(typeof(Character), "Awake")]
+    public static class Character_Awake_SkeletonBuff_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(Character __instance)
+        {
+            if (!MegaSkeletonsPlugin.EnableSkeletonBuff.Value) return;
+
+            // Match both prefab names (Skeleton_Friendly) and display names (Skelett)
+            string objName = __instance.gameObject.name.ToLower();
+            if (!objName.Contains("skeleton") && !objName.Contains("skelett")) return;
+
+            MegaSkeletonsPlugin.Log($"[SkeletonBuff] Attaching to '{__instance.gameObject.name}'");
+            if (__instance.gameObject.GetComponent<SkeletonBuff>() == null)
+                __instance.gameObject.AddComponent<SkeletonBuff>();
+        }
+    }
+
+    // ==================== SKELETON BUFFS ====================
+
+    /// <summary>
+    /// Buffs summoned (tamed) skeletons from the Dead Raiser staff:
+    /// - Health multiplier (applied once on first tamed detection, via ZDO)
+    /// - Heal over time (continuous HP regen)
+    /// - Speed matching to player walk/run speed (continuous)
+    /// - Attack animation speed multiplier (continuous during attacks)
+    /// </summary>
+    public class SkeletonBuff : MonoBehaviour
+    {
+        private Character _character;
+        private MonsterAI _monsterAI;
+        private Animator _animator;
+        private bool _healthApplied;
+        private float _healTimer;
+
+        void Awake()
+        {
+            _character = GetComponent<Character>();
+            _monsterAI = GetComponent<MonsterAI>();
+            _animator = GetComponentInChildren<Animator>();
+        }
+
+        void Update()
+        {
+            if (_character == null) return;
+
+            // Only buff tamed skeletons (player-summoned via Dead Raiser)
+            if (!_character.IsTamed()) return;
+
+            if (!MegaSkeletonsPlugin.EnableSkeletonBuff.Value) return;
+
+            Player player = Player.m_localPlayer;
+            if (player == null) return;
+
+            // Health multiplier — apply once via ZDO (m_health field is dead after Awake)
+            if (!_healthApplied)
+            {
+                _healthApplied = true;
+                float mult = MegaSkeletonsPlugin.SkeletonHealthMultiplier.Value;
+                if (mult > 1f)
+                {
+                    var nview = _character.GetComponent<ZNetView>();
+                    if (nview != null && nview.IsValid())
+                    {
+                        float newMax = _character.GetMaxHealth() * mult;
+                        nview.GetZDO().Set(ZDOVars.s_maxHealth, newMax);
+                        nview.GetZDO().Set(ZDOVars.s_health, newMax);
+                        _character.m_health = newMax; // sync field for any direct reads
+                        MegaSkeletonsPlugin.Log($"[SkeletonBuff] Health buffed to {newMax} ({mult}x)");
+                    }
+                }
+            }
+
+            // Heal over time — continuous regen (skip if dead to prevent resurrection)
+            float healRate = MegaSkeletonsPlugin.SkeletonHealPerSecond.Value;
+            if (healRate > 0f && !_character.IsDead())
+            {
+                _healTimer += Time.deltaTime;
+                if (_healTimer >= 1f)
+                {
+                    _healTimer = 0f;
+                    var nview = _character.GetComponent<ZNetView>();
+                    if (nview != null && nview.IsValid())
+                    {
+                        float maxHp = _character.GetMaxHealth();
+                        float curHp = _character.GetHealth();
+                        if (curHp > 0f && curHp < maxHp)
+                        {
+                            float newHp = Mathf.Min(curHp + healRate, maxHp);
+                            _character.SetHealth(newHp);
+                        }
+                    }
+                }
+            }
+
+            // Speed matching — continuous, with multiplier so they keep up during sprint
+            if (MegaSkeletonsPlugin.EnableSkeletonSpeedMatch.Value)
+            {
+                float speedMult = MegaSkeletonsPlugin.SkeletonSpeedMultiplier.Value;
+                _character.m_walkSpeed = player.m_walkSpeed * speedMult;
+                _character.m_runSpeed = player.m_runSpeed * speedMult;
+                _character.m_acceleration = 20f; // snappy acceleration (vanilla ~6)
+                _character.m_turnSpeed = 600f;    // fast turning to follow player
+            }
+
+            // Attack speed — only during attacks to avoid twitchy idle/walk animations
+            if (_animator != null)
+            {
+                float attackMult = MegaSkeletonsPlugin.SkeletonAttackSpeedMultiplier.Value;
+                if (attackMult > 1f && _character.InAttack())
+                    _animator.speed = attackMult;
+                else
+                    _animator.speed = 1f;
+            }
+        }
+    }
+
+    // ==================== SKELETON PERSISTENCE ====================
+
+    /// <summary>
+    /// Saves skeleton state before teleport, respawns after arrival.
+    /// Hooks Player.TeleportTo (start) and Player.UpdateTeleport (complete).
+    /// </summary>
+    public static class SkeletonPersistence
+    {
+        private struct SavedSkeleton
+        {
+            public string PrefabName;
+            public float Health;
+            public float MaxHealth;
+            public int Level;
+        }
+
+        private static readonly List<SavedSkeleton> _savedSkeletons = new List<SavedSkeleton>();
+        private static bool _waitingToRespawn;
+
+        public static bool IsSkeletonPrefab(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            string lower = name.ToLower();
+            return lower.Contains("skeleton") || lower.Contains("skelett");
+        }
+
+        /// <summary>
+        /// Find all tamed skeletons following the local player within radius.
+        /// </summary>
+        public static List<Character> GetNearbyTamedSkeletons(Player player, float radius)
+        {
+            var results = new List<Character>();
+            if (player == null) return results;
+
+            var allCharacters = Character.GetAllCharacters();
+            Vector3 playerPos = player.transform.position;
+
+            foreach (var character in allCharacters)
+            {
+                if (character == null || character == player) continue;
+                if (!character.IsTamed()) continue;
+                if (!IsSkeletonPrefab(character.gameObject.name)) continue;
+
+                float dist = Vector3.Distance(playerPos, character.transform.position);
+                if (dist > radius) continue;
+
+                // Check it's following the player (MonsterAI follow target)
+                var monsterAI = character.GetComponent<MonsterAI>();
+                if (monsterAI != null)
+                {
+                    var followTarget = monsterAI.GetFollowTarget();
+                    if (followTarget == null || followTarget != player.gameObject) continue;
+                }
+
+                results.Add(character);
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Save skeleton state and destroy them before teleport.
+        /// </summary>
+        public static void SaveAndDestroySkeletons(Player player)
+        {
+            if (!MegaSkeletonsPlugin.EnableSkeletonPersistence.Value) return;
+
+            _savedSkeletons.Clear();
+            _waitingToRespawn = false;
+
+            float radius = MegaSkeletonsPlugin.SkeletonFollowRadius.Value;
+            var skeletons = GetNearbyTamedSkeletons(player, radius);
+
+            foreach (var skeleton in skeletons)
+            {
+                var nview = skeleton.GetComponent<ZNetView>();
+                if (nview == null || !nview.IsValid()) continue;
+
+                // Get the clean prefab name (strip "(Clone)" and instance numbers)
+                string prefabName = Utils.GetPrefabName(skeleton.gameObject);
+
+                var saved = new SavedSkeleton
+                {
+                    PrefabName = prefabName,
+                    Health = skeleton.GetHealth(),
+                    MaxHealth = skeleton.GetMaxHealth(),
+                    Level = skeleton.GetLevel()
+                };
+
+                _savedSkeletons.Add(saved);
+                MegaSkeletonsPlugin.Log($"[Persistence] Saved skeleton: {prefabName}, HP={saved.Health}/{saved.MaxHealth}, Lvl={saved.Level}");
+
+                // Destroy via ZNetScene so it's properly cleaned up across the network
+                nview.Destroy();
+            }
+
+            if (_savedSkeletons.Count > 0)
+            {
+                _waitingToRespawn = true;
+                MegaSkeletonsPlugin.Log($"[Persistence] Saved {_savedSkeletons.Count} skeleton(s) for teleport");
+            }
+        }
+
+        /// <summary>
+        /// Respawn saved skeletons near the player after teleport completes.
+        /// </summary>
+        public static void RespawnSkeletons(Player player)
+        {
+            if (!_waitingToRespawn || _savedSkeletons.Count == 0) return;
+
+            _waitingToRespawn = false;
+            MegaSkeletonsPlugin.Log($"[Persistence] Respawning {_savedSkeletons.Count} skeleton(s)");
+
+            int index = 0;
+            foreach (var saved in _savedSkeletons)
+            {
+                var prefab = ZNetScene.instance.GetPrefab(saved.PrefabName);
+                if (prefab == null)
+                {
+                    MegaSkeletonsPlugin._logger.LogWarning($"[Persistence] Prefab '{saved.PrefabName}' not found, skipping");
+                    continue;
+                }
+
+                // Spawn near player with slight offset to avoid stacking
+                float angle = index * (360f / _savedSkeletons.Count) * Mathf.Deg2Rad;
+                Vector3 offset = new Vector3(Mathf.Cos(angle) * 2f, 0f, Mathf.Sin(angle) * 2f);
+                Vector3 spawnPos = player.transform.position + offset;
+
+                // Snap to ground
+                float groundHeight;
+                if (ZoneSystem.instance.GetGroundHeight(spawnPos, out groundHeight))
+                    spawnPos.y = groundHeight;
+
+                var go = UnityEngine.Object.Instantiate(prefab, spawnPos, Quaternion.identity);
+                var nview = go.GetComponent<ZNetView>();
+                var character = go.GetComponent<Character>();
+                var tameable = go.GetComponent<Tameable>();
+                var monsterAI = go.GetComponent<MonsterAI>();
+
+                if (nview != null && nview.IsValid())
+                {
+                    var zdo = nview.GetZDO();
+
+                    // Restore level (before health, as SetupMaxHealth uses level)
+                    if (saved.Level > 1)
+                    {
+                        zdo.Set(ZDOVars.s_level, saved.Level);
+                        if (character != null)
+                            character.SetLevel(saved.Level);
+                    }
+
+                    // Tame the skeleton (Tame() is private, use reflection)
+                    if (tameable != null)
+                    {
+                        var tameMethod = typeof(Tameable).GetMethod("Tame",
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                        tameMethod?.Invoke(tameable, null);
+                    }
+
+                    // Restore health — need a frame delay for SetupMaxHealth to run
+                    // Apply health buff multiplier on the new max health
+                    float mult = MegaSkeletonsPlugin.SkeletonHealthMultiplier.Value;
+                    float newMax = (mult > 1f) ? saved.MaxHealth : character.GetMaxHealth();
+                    zdo.Set(ZDOVars.s_maxHealth, newMax);
+                    zdo.Set(ZDOVars.s_health, Mathf.Min(saved.Health, newMax));
+                    if (character != null)
+                        character.m_health = newMax;
+
+                    // Set follow target to player
+                    if (monsterAI != null)
+                        monsterAI.SetFollowTarget(player.gameObject);
+
+                    MegaSkeletonsPlugin.Log($"[Persistence] Respawned {saved.PrefabName} at {spawnPos}, HP={saved.Health}/{newMax}");
+                }
+
+                index++;
+            }
+
+            _savedSkeletons.Clear();
+        }
+
+        /// <summary>
+        /// Check if we're waiting to respawn skeletons.
+        /// </summary>
+        public static bool IsWaitingToRespawn => _waitingToRespawn;
+    }
+
+    // ==================== TELEPORT HOOKS ====================
+
+    /// <summary>
+    /// Capture nearby tamed skeletons before any teleport begins.
+    /// This fires for portals, dungeon doors, map teleport, etc.
+    /// </summary>
+    [HarmonyPatch(typeof(Player), nameof(Player.TeleportTo))]
+    public static class Player_TeleportTo_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix(Player __instance)
+        {
+            if (__instance != Player.m_localPlayer) return;
+            MegaSkeletonsPlugin.Log("[Persistence] Player teleport starting — saving skeletons");
+            SkeletonPersistence.SaveAndDestroySkeletons(__instance);
+        }
+    }
+
+    /// <summary>
+    /// Detect when teleport completes and respawn saved skeletons.
+    /// Player.UpdateTeleport runs every frame during teleport.
+    /// When m_teleporting goes false, teleport is complete.
+    /// </summary>
+    [HarmonyPatch(typeof(Player), "UpdateTeleport")]
+    public static class Player_UpdateTeleport_Patch
+    {
+        private static bool _wasTeleporting;
+
+        [HarmonyPostfix]
+        public static void Postfix(Player __instance)
+        {
+            if (__instance != Player.m_localPlayer) return;
+
+            // Access m_teleporting via Traverse (private field)
+            bool isTeleporting = Traverse.Create(__instance).Field("m_teleporting").GetValue<bool>();
+
+            // Detect transition from teleporting → not teleporting
+            if (_wasTeleporting && !isTeleporting)
+            {
+                MegaSkeletonsPlugin.Log("[Persistence] Teleport complete — respawning skeletons");
+                SkeletonPersistence.RespawnSkeletons(__instance);
+            }
+
+            _wasTeleporting = isTeleporting;
+        }
+    }
+
+    // ==================== VANILLA BUG FIX ====================
+
+    /// <summary>
+    /// Guard against NRE in MonsterAI.PheromoneFleeCheck when skeleton references go stale.
+    /// (Moved from MegaQoL since it primarily affects summoned skeletons)
+    /// </summary>
+    [HarmonyPatch(typeof(MonsterAI), "PheromoneFleeCheck")]
+    public static class PheromoneFleeCheckNullGuard
+    {
+        static bool Prefix(MonsterAI __instance, Character target)
+        {
+            return __instance != null && target != null;
+        }
+
+        static Exception Finalizer(Exception __exception)
+        {
+            if (__exception is NullReferenceException)
+                return null;
+            return __exception;
+        }
+    }
+}
