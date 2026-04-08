@@ -15,7 +15,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.0.1";
+        public const string PluginVersion = "1.0.2";
 
         internal static ManualLogSource _logger;
         private static Harmony _harmony;
@@ -415,8 +415,8 @@ namespace MegaSkeletons
     // ==================== TELEPORT HOOKS ====================
 
     /// <summary>
-    /// Capture nearby tamed skeletons before any teleport begins.
-    /// This fires for portals, dungeon doors, map teleport, etc.
+    /// Capture nearby tamed skeletons before portal teleport.
+    /// Player.TeleportTo fires for portals and map teleport.
     /// </summary>
     [HarmonyPatch(typeof(Player), nameof(Player.TeleportTo))]
     public static class Player_TeleportTo_Patch
@@ -427,6 +427,27 @@ namespace MegaSkeletons
             if (__instance != Player.m_localPlayer) return;
             MegaSkeletonsPlugin.LogAlways("[Persistence] Player.TeleportTo fired — saving skeletons");
             SkeletonPersistence.SaveAndDestroySkeletons(__instance);
+        }
+    }
+
+    /// <summary>
+    /// Capture nearby tamed skeletons before dungeon entrance/exit.
+    /// Teleport.Interact fires when player uses a dungeon door — separate path from Player.TeleportTo.
+    /// </summary>
+    [HarmonyPatch(typeof(Teleport), nameof(Teleport.Interact))]
+    public static class Teleport_Interact_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix(Teleport __instance, Humanoid character)
+        {
+            var player = character as Player;
+            if (player == null || player != Player.m_localPlayer) return;
+
+            // Only save if we have a valid target point (actual dungeon door, not a broken one)
+            if (__instance.m_targetPoint == null) return;
+
+            MegaSkeletonsPlugin.LogAlways("[Persistence] Teleport.Interact fired (dungeon door) — saving skeletons");
+            SkeletonPersistence.SaveAndDestroySkeletons(player);
         }
     }
 
