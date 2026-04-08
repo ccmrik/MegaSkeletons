@@ -15,7 +15,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.0.3";
+        public const string PluginVersion = "1.0.4";
 
         internal static ManualLogSource _logger;
         private static Harmony _harmony;
@@ -298,6 +298,15 @@ namespace MegaSkeletons
         public static void SaveAndDestroySkeletons(Player player)
         {
             if (!MegaSkeletonsPlugin.EnableSkeletonPersistence.Value) return;
+
+            // If we already have saved skeletons pending respawn, don't overwrite them.
+            // This prevents Teleport.Interact → Player.TeleportTo double-fire from clearing
+            // the batch that Interact already captured.
+            if (_waitingToRespawn && _savedSkeletons.Count > 0)
+            {
+                MegaSkeletonsPlugin.LogAlways($"[Persistence] Already have {_savedSkeletons.Count} skeleton(s) pending — skipping duplicate save");
+                return;
+            }
 
             _savedSkeletons.Clear();
             _waitingToRespawn = false;
