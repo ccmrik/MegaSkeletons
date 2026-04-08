@@ -15,7 +15,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.0.2";
+        public const string PluginVersion = "1.0.3";
 
         internal static ManualLogSource _logger;
         private static Harmony _harmony;
@@ -265,16 +265,27 @@ namespace MegaSkeletons
             var allCharacters = Character.GetAllCharacters();
             Vector3 playerPos = player.transform.position;
 
+            MegaSkeletonsPlugin.LogAlways($"[Persistence] Scanning {allCharacters.Count} characters within {radius}m...");
+
             foreach (var character in allCharacters)
             {
                 if (character == null || character == player) continue;
-                if (!character.IsTamed()) continue;
-                if (!IsSkeletonPrefab(character.gameObject.name)) continue;
 
+                string objName = character.gameObject.name;
                 float dist = Vector3.Distance(playerPos, character.transform.position);
+                bool isTamed = character.IsTamed();
+                bool isSkele = IsSkeletonPrefab(objName);
+
+                // Log all nearby creatures for diagnostics
+                if (dist <= radius && (isTamed || isSkele))
+                {
+                    MegaSkeletonsPlugin.LogAlways($"[Persistence]   '{objName}' dist={dist:F1} tamed={isTamed} skeleName={isSkele}");
+                }
+
+                if (!isTamed) continue;
+                if (!isSkele) continue;
                 if (dist > radius) continue;
 
-                MegaSkeletonsPlugin.Log($"[Persistence] Found tamed skeleton: '{character.gameObject.name}' at dist={dist:F1}");
                 results.Add(character);
             }
 
