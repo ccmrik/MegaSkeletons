@@ -15,7 +15,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.0.4";
+        public const string PluginVersion = "1.0.5";
 
         internal static ManualLogSource _logger;
         private static Harmony _harmony;
@@ -369,14 +369,11 @@ namespace MegaSkeletons
                 }
 
                 // Spawn near player with slight offset to avoid stacking
+                // Use player's Y directly — GetGroundHeight returns terrain surface height
+                // which is wrong inside dungeons (underground cave systems)
                 float angle = index * (360f / _savedSkeletons.Count) * Mathf.Deg2Rad;
                 Vector3 offset = new Vector3(Mathf.Cos(angle) * 2f, 0f, Mathf.Sin(angle) * 2f);
                 Vector3 spawnPos = player.transform.position + offset;
-
-                // Snap to ground
-                float groundHeight;
-                if (ZoneSystem.instance.GetGroundHeight(spawnPos, out groundHeight))
-                    spawnPos.y = groundHeight;
 
                 var go = UnityEngine.Object.Instantiate(prefab, spawnPos, Quaternion.identity);
                 var nview = go.GetComponent<ZNetView>();
