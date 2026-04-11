@@ -16,7 +16,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.0.6";
+        public const string PluginVersion = "1.0.7";
 
         public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
@@ -238,6 +238,11 @@ namespace MegaSkeletons
                 _character.m_runSpeed = player.m_runSpeed * speedMult;
                 _character.m_acceleration = 20f; // snappy acceleration (vanilla ~6)
                 _character.m_turnSpeed = 600f;    // fast turning to follow player
+
+                // Water speed — match swim speed so skeletons keep up in water
+                _character.m_swimSpeed = player.m_swimSpeed * speedMult;
+                _character.m_swimAcceleration = player.m_swimAcceleration;
+                _character.m_swimTurnSpeed = player.m_swimTurnSpeed;
             }
 
             // Attack speed — only during attacks to avoid twitchy idle/walk animations
