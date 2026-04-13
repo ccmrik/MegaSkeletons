@@ -16,7 +16,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.0.7";
+        public const string PluginVersion = "1.0.8";
 
         public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
@@ -56,8 +56,8 @@ namespace MegaSkeletons
                 "Match summoned skeleton walk/run speed to the player so they keep up");
             SkeletonSpeedMultiplier = Config.Bind("1. Skeleton Buffs", "SpeedMultiplier", 1.5f,
                 new ConfigDescription("Speed multiplier on top of player speed matching (1.5 = 50% faster than player, helps them keep up during sprint)", new AcceptableValueRange<float>(1f, 5f)));
-            SkeletonAttackSpeedMultiplier = Config.Bind("1. Skeleton Buffs", "AttackSpeedMultiplier", 1f,
-                new ConfigDescription("Attack animation speed multiplier (1 = vanilla, 2 = double speed)", new AcceptableValueRange<float>(1f, 5f)));
+            SkeletonAttackSpeedMultiplier = Config.Bind("1. Skeleton Buffs", "AttackSpeedMultiplier", 1.5f,
+                new ConfigDescription("Attack speed multiplier for summoned skeletons (1 = vanilla, 2 = double speed). Affects both animation and attack timing.", new AcceptableValueRange<float>(1f, 5f)));
 
             // 2. Skeleton Persistence
             EnableSkeletonPersistence = Config.Bind("2. Skeleton Persistence", "Enable", true,
@@ -143,7 +143,6 @@ namespace MegaSkeletons
     {
         private Character _character;
         private MonsterAI _monsterAI;
-        private Animator _animator;
         private bool _healthApplied;
         private float _healTimer;
 
@@ -154,7 +153,6 @@ namespace MegaSkeletons
         {
             _character = GetComponent<Character>();
             _monsterAI = GetComponent<MonsterAI>();
-            _animator = GetComponentInChildren<Animator>();
         }
 
         void OnDestroy()
@@ -245,15 +243,45 @@ namespace MegaSkeletons
                 _character.m_swimTurnSpeed = player.m_swimTurnSpeed;
             }
 
-            // Attack speed — only during attacks to avoid twitchy idle/walk animations
-            if (_animator != null)
-            {
-                float attackMult = MegaSkeletonsPlugin.SkeletonAttackSpeedMultiplier.Value;
-                if (attackMult > 1f && _character.InAttack())
-                    _animator.speed = attackMult;
-                else
-                    _animator.speed = 1f;
-            }
+            // Attack speed is handled by Attack_Start_SkeletonSpeed_Patch (modifies m_speedFactor)
+        }
+    }
+
+    // ==================== SKELETON ATTACK SPEED ====================
+
+    /// <summary>
+    /// Boosts tamed skeleton attack speed by modifying Attack.m_speedFactor after the
+    /// attack starts. This scales both the animation playback and the internal attack
+    /// timer so damage, cooldown, and visuals all stay in sync.
+    /// </summary>
+    [HarmonyPatch(typeof(Attack), nameof(Attack.Start))]
+    public static class Attack_Start_SkeletonSpeed_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(Attack __instance, bool __result)
+        {
+            if (!__result) return;
+            if (!MegaSkeletonsPlugin.EnableSkeletonBuff.Value) return;
+
+            float mult = MegaSkeletonsPlugin.SkeletonAttackSpeedMultiplier.Value;
+            if (mult <= 1f) return;
+
+            // m_character is private — access via Traverse
+            var character = Traverse.Create(__instance).Field("m_character").GetValue<Character>();
+            if (character == null || !character.IsTamed()) return;
+
+            string objName = character.gameObject.name.ToLower();
+            if (!objName.Contains("skeleton") && !objName.Contains("skelett")) return;
+
+            // Scale the speed factor that Attack.Update() uses to advance the attack timer
+            __instance.m_speedFactor *= mult;
+
+            // Re-set animation speed to match (Start() already called SetSpeed with the original value)
+            var zanim = Traverse.Create(__instance).Field("m_zanim").GetValue<ZSyncAnimation>();
+            if (zanim != null)
+                zanim.SetSpeed(__instance.m_speedFactor);
+
+            MegaSkeletonsPlugin.Log($"[SkeletonBuff] Attack speed boosted: speedFactor={__instance.m_speedFactor:F2} (x{mult})");
         }
     }
 
