@@ -16,7 +16,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.0.8";
+        public const string PluginVersion = "1.1.0";
 
         public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
@@ -45,6 +45,9 @@ namespace MegaSkeletons
             _logger = Logger;
             _config = Config;
 
+            MigrateDebugSection(Config.ConfigFilePath);
+            Config.Reload();
+
             // 1. Skeleton Buffs
             EnableSkeletonBuff = Config.Bind("1. Skeleton Buffs", "Enable", true,
                 "Buffs summoned skeletons from the Dead Raiser (health, speed, attack speed, heal over time)");
@@ -65,8 +68,8 @@ namespace MegaSkeletons
             SkeletonFollowRadius = Config.Bind("2. Skeleton Persistence", "FollowRadius", 30f,
                 new ConfigDescription("Max distance from player for skeletons to be teleported with you", new AcceptableValueRange<float>(5f, 100f)));
 
-            // 3. Debug
-            DebugMode = Config.Bind("3. Debug", "DebugMode", false,
+            // 99. Debug — standardised section across all Mega mods (v1.1.0+)
+            DebugMode = Config.Bind("99. Debug", "DebugMode", false,
                 "Enable verbose debug logging to BepInEx console/log");
 
             // Config file watcher for live reload
@@ -82,6 +85,20 @@ namespace MegaSkeletons
         {
             _harmony?.UnpatchSelf();
             _configWatcher?.Dispose();
+        }
+
+        /// <summary>One-shot rename of "[3. Debug]" → "[99. Debug]" so user configs carry over.</summary>
+        private static void MigrateDebugSection(string configPath)
+        {
+            try
+            {
+                if (!File.Exists(configPath)) return;
+                var text = File.ReadAllText(configPath);
+                if (text.Contains("[99. Debug]")) return;
+                if (!text.Contains("[3. Debug]")) return;
+                File.WriteAllText(configPath, text.Replace("[3. Debug]", "[99. Debug]"));
+            }
+            catch { /* non-fatal */ }
         }
 
         private void SetupConfigWatcher()
