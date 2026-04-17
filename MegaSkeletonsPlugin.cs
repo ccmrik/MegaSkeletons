@@ -16,7 +16,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.1.0";
+        public const string PluginVersion = "1.1.1";
 
         public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
@@ -120,7 +120,7 @@ namespace MegaSkeletons
                 _logger.LogInfo(message);
         }
 
-        /// <summary>Always log (not gated by DebugMode) — for critical persistence events.</summary>
+        /// <summary>Always log (not gated by DebugMode) — reserve for startup/critical events only.</summary>
         internal static void LogAlways(string message)
         {
             _logger.LogInfo(message);
@@ -177,8 +177,8 @@ namespace MegaSkeletons
             // Diagnostic: log when tamed skeletons are destroyed (helps debug dungeon disappearance)
             if (_character != null && _character.IsTamed())
             {
-                MegaSkeletonsPlugin.LogAlways($"[SkeletonBuff] Tamed skeleton DESTROYED: '{_character.gameObject?.name}' IsDead={_character.IsDead()} HP={_character.GetHealth()}");
-                MegaSkeletonsPlugin.LogAlways($"[SkeletonBuff] Destroy stack: {Environment.StackTrace}");
+                MegaSkeletonsPlugin.Log($"[SkeletonBuff] Tamed skeleton DESTROYED: '{_character.gameObject?.name}' IsDead={_character.IsDead()} HP={_character.GetHealth()}");
+                MegaSkeletonsPlugin.Log($"[SkeletonBuff] Destroy stack: {Environment.StackTrace}");
             }
         }
 
@@ -341,7 +341,7 @@ namespace MegaSkeletons
             var allCharacters = Character.GetAllCharacters();
             Vector3 playerPos = player.transform.position;
 
-            MegaSkeletonsPlugin.LogAlways($"[Persistence] Scanning {allCharacters.Count} characters within {radius}m...");
+            MegaSkeletonsPlugin.Log($"[Persistence] Scanning {allCharacters.Count} characters within {radius}m...");
 
             foreach (var character in allCharacters)
             {
@@ -355,7 +355,7 @@ namespace MegaSkeletons
                 // Log all nearby creatures for diagnostics
                 if (dist <= radius && (isTamed || isSkele))
                 {
-                    MegaSkeletonsPlugin.LogAlways($"[Persistence]   '{objName}' dist={dist:F1} tamed={isTamed} skeleName={isSkele}");
+                    MegaSkeletonsPlugin.Log($"[Persistence]   '{objName}' dist={dist:F1} tamed={isTamed} skeleName={isSkele}");
                 }
 
                 if (!isTamed) continue;
@@ -380,7 +380,7 @@ namespace MegaSkeletons
             // the batch that Interact already captured.
             if (_waitingToRespawn && _savedSkeletons.Count > 0)
             {
-                MegaSkeletonsPlugin.LogAlways($"[Persistence] Already have {_savedSkeletons.Count} skeleton(s) pending — skipping duplicate save");
+                MegaSkeletonsPlugin.Log($"[Persistence] Already have {_savedSkeletons.Count} skeleton(s) pending — skipping duplicate save");
                 return;
             }
 
@@ -407,7 +407,7 @@ namespace MegaSkeletons
                 };
 
                 _savedSkeletons.Add(saved);
-                MegaSkeletonsPlugin.LogAlways($"[Persistence] Saved skeleton: {prefabName}, HP={saved.Health}/{saved.MaxHealth}, Lvl={saved.Level}");
+                MegaSkeletonsPlugin.Log($"[Persistence] Saved skeleton: {prefabName}, HP={saved.Health}/{saved.MaxHealth}, Lvl={saved.Level}");
 
                 // Destroy via ZNetScene so it's properly cleaned up across the network
                 nview.Destroy();
@@ -416,11 +416,11 @@ namespace MegaSkeletons
             if (_savedSkeletons.Count > 0)
             {
                 _waitingToRespawn = true;
-                MegaSkeletonsPlugin.LogAlways($"[Persistence] Saved {_savedSkeletons.Count} skeleton(s) for teleport");
+                MegaSkeletonsPlugin.Log($"[Persistence] Saved {_savedSkeletons.Count} skeleton(s) for teleport");
             }
             else
             {
-                MegaSkeletonsPlugin.LogAlways($"[Persistence] No tamed skeletons found within {radius}m radius");
+                MegaSkeletonsPlugin.Log($"[Persistence] No tamed skeletons found within {radius}m radius");
             }
         }
 
@@ -441,7 +441,7 @@ namespace MegaSkeletons
             // Delay spawn by 3 seconds to let dungeon environments fully load.
             // Without this, skeletons spawned inside dungeons can fall through
             // floors or get cleaned up by zone management before rooms settle.
-            MegaSkeletonsPlugin.LogAlways($"[Persistence] Waiting 3s for environment to load before respawning {toRespawn.Count} skeleton(s)...");
+            MegaSkeletonsPlugin.Log($"[Persistence] Waiting 3s for environment to load before respawning {toRespawn.Count} skeleton(s)...");
             MegaSkeletonsPlugin.Instance.StartCoroutine(RespawnCoroutine(player, toRespawn));
         }
 
@@ -451,11 +451,11 @@ namespace MegaSkeletons
 
             if (player == null)
             {
-                MegaSkeletonsPlugin.LogAlways("[Persistence] Player gone after delay — aborting respawn");
+                MegaSkeletonsPlugin.Log("[Persistence] Player gone after delay — aborting respawn");
                 yield break;
             }
 
-            MegaSkeletonsPlugin.LogAlways($"[Persistence] Respawning {skeletons.Count} skeleton(s)");
+            MegaSkeletonsPlugin.Log($"[Persistence] Respawning {skeletons.Count} skeleton(s)");
 
             // ZDO hash for the HP-buff flag (same as SkeletonBuff uses)
             int megaHpBuffed = "mega_hp_buffed".GetStableHashCode();
@@ -515,7 +515,7 @@ namespace MegaSkeletons
                     if (monsterAI != null)
                         monsterAI.SetFollowTarget(player.gameObject);
 
-                    MegaSkeletonsPlugin.LogAlways($"[Persistence] Respawned {saved.PrefabName} at {spawnPos}, HP={saved.Health}/{saved.MaxHealth}");
+                    MegaSkeletonsPlugin.Log($"[Persistence] Respawned {saved.PrefabName} at {spawnPos}, HP={saved.Health}/{saved.MaxHealth}");
                 }
 
                 index++;
@@ -541,7 +541,7 @@ namespace MegaSkeletons
         public static void Prefix(Player __instance)
         {
             if (__instance != Player.m_localPlayer) return;
-            MegaSkeletonsPlugin.LogAlways("[Persistence] Player.TeleportTo fired — saving skeletons");
+            MegaSkeletonsPlugin.Log("[Persistence] Player.TeleportTo fired — saving skeletons");
             SkeletonPersistence.SaveAndDestroySkeletons(__instance);
         }
     }
@@ -562,7 +562,7 @@ namespace MegaSkeletons
             // Only save if we have a valid target point (actual dungeon door, not a broken one)
             if (__instance.m_targetPoint == null) return;
 
-            MegaSkeletonsPlugin.LogAlways("[Persistence] Teleport.Interact fired (dungeon door) — saving skeletons");
+            MegaSkeletonsPlugin.Log("[Persistence] Teleport.Interact fired (dungeon door) — saving skeletons");
             SkeletonPersistence.SaveAndDestroySkeletons(player);
         }
     }
@@ -588,7 +588,7 @@ namespace MegaSkeletons
             // Detect transition from teleporting → not teleporting
             if (_wasTeleporting && !isTeleporting)
             {
-                MegaSkeletonsPlugin.LogAlways("[Persistence] Teleport complete — respawning skeletons");
+                MegaSkeletonsPlugin.Log("[Persistence] Teleport complete — respawning skeletons");
                 SkeletonPersistence.RespawnSkeletons(__instance);
             }
 
