@@ -16,7 +16,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.2.2";
+        public const string PluginVersion = "1.2.3";
 
         public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
@@ -53,7 +53,11 @@ namespace MegaSkeletons
             _config = Config;
 
             MigrateDebugSection(Config.ConfigFilePath);
-            Config.Reload();
+            // Only reload if the file already exists; on a fresh profile the file is
+            // created by the first Bind() call below, and calling Reload() on a missing
+            // file throws FileNotFoundException and aborts Awake (no patches applied).
+            if (File.Exists(Config.ConfigFilePath))
+                Config.Reload();
 
             // 1. Skeleton Buffs
             EnableSkeletonBuff = Config.Bind("1. Skeleton Buffs", "Enable", true,
