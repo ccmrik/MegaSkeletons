@@ -16,7 +16,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.2.1";
+        public const string PluginVersion = "1.2.2";
 
         public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
@@ -651,10 +651,10 @@ namespace MegaSkeletons
         private static readonly Dictionary<ExplosionFx, string[]> FxFallbacks = new Dictionary<ExplosionFx, string[]>
         {
             [ExplosionFx.StaffEmbers] = new[] { "fx_fireball_staff_explosion", "fx_shaman_fireball_expl", "charred_fireball_aoe" },
-            [ExplosionFx.Meteor]      = new[] { "fx_fader_meteorsmash", "Fader_MeteorSmash_AOE", "fx_goblinking_meteor_hit", "fx_fader_meteor_hit" },
+            [ExplosionFx.Meteor]      = new[] { "fx_goblinking_meteor_hit", "fx_fader_meteor_hit", "Fader_MeteorSmash_AOE", "fx_fader_meteorsmash" },
             [ExplosionFx.Bonemass]    = new[] { "bonemass_aoe", "fx_Bonemass_aoe_start" },
             [ExplosionFx.Lava]        = new[] { "fx_lavabomb_explosion", "lavabomb_explosion", "fx_unstablelavarock_explosion", "fx_blobLava_explosion" },
-            [ExplosionFx.Lightning]   = new[] { "fx_redlightning_burst", "fx_chainlightning_spread", "fx_DvergerMage_Nova_ring", "aoe_nova" },
+            [ExplosionFx.Lightning]   = new[] { "fx_chainlightning_spread", "lightningAOE", "fx_Lightning", "fx_DvergerMage_Nova_ring", "aoe_nova", "fx_redlightning_burst" },
         };
 
         public static void TryDetonate(Player player)
@@ -685,22 +685,49 @@ namespace MegaSkeletons
 
             MegaSkeletonsPlugin.LogAlways($"[Exploder] Detonating {skeletons.Count} skeleton(s) — radius={aoeRadius}m, mult={mult}x, fx={fxType}");
 
+            ZDOID attackerId = player.GetZDOID();
             int idx = 0;
             foreach (var sk in skeletons)
             {
                 if (sk == null) continue;
                 Vector3 pos = sk.transform.position;
 
-                // Destroy the skeleton first so it doesn't get hit by its own AOE
-                var nv = sk.GetComponent<ZNetView>();
-                if (nv != null && nv.IsValid())
-                {
-                    if (!nv.IsOwner()) nv.ClaimOwnership();
-                    nv.Destroy();
-                }
-
+                // Spawn the visual + apply outward AOE first; ApplyAoeDamage
+                // skips tamed creatures so the skeleton itself is safe from
+                // its own blast — we then send a lethal HitData so Valheim's
+                // OnDeath path runs the proper skeleton death animation,
+                // ragdoll, and audio (rather than yanking the netview which
+                // just makes the skeleton vanish silently).
                 SpawnExplosionFx(pos, fxType);
                 ApplyAoeDamage(pos, aoeRadius, mult, player);
+
+                var nv = sk.GetComponent<ZNetView>();
+                if (nv != null && nv.IsValid() && !nv.IsOwner())
+                    nv.ClaimOwnership();
+
+                try
+                {
+                    var lethal = new HitData
+                    {
+                        m_point = pos,
+                        m_dir = Vector3.up,
+                        m_pushForce = 20f,
+                        m_attacker = attackerId,
+                    };
+                    lethal.m_damage.m_damage   = 999999f;
+                    lethal.m_damage.m_blunt    = 999999f;
+                    lethal.m_damage.m_slash    = 999999f;
+                    lethal.m_damage.m_pierce   = 999999f;
+                    lethal.m_damage.m_fire     = 999999f;
+                    lethal.m_damage.m_spirit   = 999999f;
+                    sk.Damage(lethal);
+                }
+                catch (Exception ex)
+                {
+                    MegaSkeletonsPlugin.Log($"[Exploder] Lethal damage failed ({ex.Message}) — falling back to nview.Destroy()");
+                    if (nv != null && nv.IsValid()) nv.Destroy();
+                }
+
                 idx++;
             }
 
