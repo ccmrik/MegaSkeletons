@@ -16,7 +16,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.1.1";
+        public const string PluginVersion = "1.2.0";
 
         public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
@@ -35,6 +35,13 @@ namespace MegaSkeletons
         // Skeleton Persistence
         public static ConfigEntry<bool> EnableSkeletonPersistence;
         public static ConfigEntry<float> SkeletonFollowRadius;
+
+        // Skeleton Exploder
+        public static ConfigEntry<bool> EnableSkeletonExploder;
+        public static ConfigEntry<KeyboardShortcut> ExploderHotkey;
+        public static ConfigEntry<float> ExploderDamageMultiplier;
+        public static ConfigEntry<float> ExploderAoeRadius;
+        public static ConfigEntry<SkeletonExploder.ExplosionFx> ExploderExplosionType;
 
         // Debug
         public static ConfigEntry<bool> DebugMode;
@@ -68,6 +75,18 @@ namespace MegaSkeletons
             SkeletonFollowRadius = Config.Bind("2. Skeleton Persistence", "FollowRadius", 30f,
                 new ConfigDescription("Max distance from player for skeletons to be teleported with you", new AcceptableValueRange<float>(5f, 100f)));
 
+            // 3. Skeleton Exploder — remote-detonate every controlled skeleton in follow radius
+            EnableSkeletonExploder = Config.Bind("3. Skeleton Exploder", "Enable", true,
+                "Press the hotkey to detonate every tamed skeleton in follow radius (each leaves an AOE explosion)");
+            ExploderHotkey = Config.Bind("3. Skeleton Exploder", "Hotkey", new KeyboardShortcut(KeyCode.KeypadEnter),
+                "Hotkey to trigger detonation of all controlled skeletons");
+            ExploderDamageMultiplier = Config.Bind("3. Skeleton Exploder", "DamageMultiplier", 1f,
+                new ConfigDescription("Damage multiplier on top of the 200-base elemental split (40 fire/poison/spirit/lightning/frost). 1x = 200 elemental, 10x = 2000.", new AcceptableValueRange<float>(1f, 10f)));
+            ExploderAoeRadius = Config.Bind("3. Skeleton Exploder", "AoeRadius", 10f,
+                new ConfigDescription("AOE damage radius around each detonating skeleton (metres)", new AcceptableValueRange<float>(1f, 100f)));
+            ExploderExplosionType = Config.Bind("3. Skeleton Exploder", "ExplosionType", SkeletonExploder.ExplosionFx.StaffEmbers,
+                "Visual explosion effect. StaffEmbers mimics the Staff of Embers; Meteor/Bonemass/Lava/Lightning use other vanilla effects. Enable DebugMode to log every fx_/explosion/aoe prefab discovered at runtime so we can refine the list.");
+
             // 99. Debug — standardised section across all Mega mods (v1.1.0+)
             DebugMode = Config.Bind("99. Debug", "DebugMode", false,
                 "Enable verbose debug logging to BepInEx console/log");
@@ -79,6 +98,14 @@ namespace MegaSkeletons
             _harmony.PatchAll();
 
             Log($"{PluginName} v{PluginVersion} loaded!");
+        }
+
+        void Update()
+        {
+            if (EnableSkeletonExploder == null || !EnableSkeletonExploder.Value) return;
+            if (Player.m_localPlayer == null) return;
+            if (ExploderHotkey.Value.IsDown())
+                SkeletonExploder.TryDetonate(Player.m_localPlayer);
         }
 
         void OnDestroy()
@@ -593,6 +620,212 @@ namespace MegaSkeletons
             }
 
             _wasTeleporting = isTeleporting;
+        }
+    }
+
+    // ==================== SKELETON EXPLODER ====================
+
+    /// <summary>
+    /// Remote detonation of every tamed skeleton in follow radius.
+    /// Each skeleton vanishes and leaves an AOE explosion at its position dealing
+    /// configurable elemental damage (40-base split across fire/poison/spirit/
+    /// lightning/frost, scaled by DamageMultiplier 1-10x). Vanilla DoT status
+    /// effects (Burning, Poisoned, etc) trigger naturally from the elemental
+    /// values via Character.Damage().
+    /// </summary>
+    public static class SkeletonExploder
+    {
+        public enum ExplosionFx
+        {
+            StaffEmbers,
+            Meteor,
+            Bonemass,
+            Lava,
+            Lightning,
+        }
+
+        private static bool _prefabsDiscovered;
+
+        private static readonly Dictionary<ExplosionFx, string[]> FxFallbacks = new Dictionary<ExplosionFx, string[]>
+        {
+            [ExplosionFx.StaffEmbers] = new[] { "fx_StaffFireball_explosion", "staff_fireball_explosion", "fx_StaffFireball_attack", "fx_HimminAfl_aoe", "fx_himinafl_aoe", "fx_meteor" },
+            [ExplosionFx.Meteor]      = new[] { "fx_meteor", "fx_meteor_explode", "fx_meteor_aoe" },
+            [ExplosionFx.Bonemass]    = new[] { "bonemass_attack_aoe", "fx_bonemass_aoe", "BonemassAOE" },
+            [ExplosionFx.Lava]        = new[] { "bomb_lava_explosion", "fx_lava_explosion", "fx_fenring_cultist_lava_explosion", "fx_lava_burst" },
+            [ExplosionFx.Lightning]   = new[] { "fx_HimminAfl_aoe", "fx_himinafl_aoe", "fx_lightning_aoe", "fx_lightning_explosion" },
+        };
+
+        public static void TryDetonate(Player player)
+        {
+            if (player == null) return;
+
+            float followRadius = MegaSkeletonsPlugin.SkeletonFollowRadius.Value;
+            var skeletons = SkeletonPersistence.GetNearbyTamedSkeletons(player, followRadius);
+
+            if (skeletons.Count == 0)
+            {
+                MegaSkeletonsPlugin.Log("[Exploder] No tamed skeletons in follow radius — nothing to detonate");
+                return;
+            }
+
+            // First-detonation prefab discovery (debug only) — logs every fx_/explosion/aoe
+            // prefab loaded by ZNetScene so we can refine the FxFallbacks list against
+            // what's actually present in this Valheim install.
+            if (MegaSkeletonsPlugin.DebugMode.Value && !_prefabsDiscovered)
+            {
+                _prefabsDiscovered = true;
+                LogDiscoveredFxPrefabs();
+            }
+
+            float aoeRadius = MegaSkeletonsPlugin.ExploderAoeRadius.Value;
+            float mult = MegaSkeletonsPlugin.ExploderDamageMultiplier.Value;
+            var fxType = MegaSkeletonsPlugin.ExploderExplosionType.Value;
+
+            MegaSkeletonsPlugin.LogAlways($"[Exploder] Detonating {skeletons.Count} skeleton(s) — radius={aoeRadius}m, mult={mult}x, fx={fxType}");
+
+            int idx = 0;
+            foreach (var sk in skeletons)
+            {
+                if (sk == null) continue;
+                Vector3 pos = sk.transform.position;
+
+                // Destroy the skeleton first so it doesn't get hit by its own AOE
+                var nv = sk.GetComponent<ZNetView>();
+                if (nv != null && nv.IsValid())
+                {
+                    if (!nv.IsOwner()) nv.ClaimOwnership();
+                    nv.Destroy();
+                }
+
+                SpawnExplosionFx(pos, fxType);
+                ApplyAoeDamage(pos, aoeRadius, mult, player);
+                idx++;
+            }
+
+            MegaSkeletonsPlugin.Log($"[Exploder] Detonation complete — {idx} skeleton(s) blown");
+        }
+
+        private static void SpawnExplosionFx(Vector3 pos, ExplosionFx fxType)
+        {
+            var zns = ZNetScene.instance;
+            if (zns == null) return;
+
+            string[] candidates;
+            if (!FxFallbacks.TryGetValue(fxType, out candidates)) return;
+
+            foreach (var name in candidates)
+            {
+                var prefab = zns.GetPrefab(name);
+                if (prefab == null) continue;
+
+                try
+                {
+                    UnityEngine.Object.Instantiate(prefab, pos, Quaternion.identity);
+                    MegaSkeletonsPlugin.Log($"[Exploder] Spawned fx '{name}' at {pos}");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    MegaSkeletonsPlugin.Log($"[Exploder] Failed to spawn fx '{name}': {ex.Message}");
+                }
+            }
+
+            MegaSkeletonsPlugin.Log($"[Exploder] No fx prefab found for {fxType} — tried: {string.Join(", ", candidates)}");
+        }
+
+        private static void ApplyAoeDamage(Vector3 center, float radius, float mult, Player attacker)
+        {
+            // 200 base damage split evenly across 5 elements = 40 each, then multiplier
+            float perElement = 40f * mult;
+            ZDOID attackerId = attacker != null ? attacker.GetZDOID() : ZDOID.None;
+
+            var hits = Physics.OverlapSphere(center, radius);
+            var damagedCharacters = new HashSet<int>();
+            var damagedWnt = new HashSet<int>();
+
+            foreach (var col in hits)
+            {
+                if (col == null) continue;
+
+                // Damage characters (skip player + tamed allies)
+                var character = col.GetComponentInParent<Character>();
+                if (character != null && !character.IsDead() && character != attacker && !character.IsTamed())
+                {
+                    int id = character.GetInstanceID();
+                    if (damagedCharacters.Add(id))
+                    {
+                        var hit = BuildElementalHit(perElement, center, character.transform.position, attackerId);
+                        try { character.Damage(hit); }
+                        catch (Exception ex) { MegaSkeletonsPlugin.Log($"[Exploder] Character.Damage failed: {ex.Message}"); }
+                    }
+                    continue;
+                }
+
+                // Damage structures (WearNTear)
+                var wnt = col.GetComponentInParent<WearNTear>();
+                if (wnt != null)
+                {
+                    int id = wnt.GetInstanceID();
+                    if (damagedWnt.Add(id))
+                    {
+                        var hit = BuildElementalHit(perElement, center, wnt.transform.position, attackerId);
+                        try { wnt.Damage(hit); }
+                        catch (Exception ex) { MegaSkeletonsPlugin.Log($"[Exploder] WearNTear.Damage failed: {ex.Message}"); }
+                    }
+                }
+            }
+
+            MegaSkeletonsPlugin.Log($"[Exploder] AOE @ {center} r={radius}m: {damagedCharacters.Count} character(s), {damagedWnt.Count} structure(s)");
+        }
+
+        private static HitData BuildElementalHit(float perElement, Vector3 center, Vector3 target, ZDOID attackerId)
+        {
+            var hit = new HitData();
+            hit.m_point = target;
+            hit.m_dir = (target - center).normalized;
+            if (hit.m_dir.sqrMagnitude < 0.01f) hit.m_dir = Vector3.up;
+            hit.m_pushForce = 50f;
+            hit.m_attacker = attackerId;
+            hit.m_damage.m_fire = perElement;
+            hit.m_damage.m_poison = perElement;
+            hit.m_damage.m_spirit = perElement;
+            hit.m_damage.m_lightning = perElement;
+            hit.m_damage.m_frost = perElement;
+            return hit;
+        }
+
+        /// <summary>
+        /// Walks ZNetScene.m_prefabs and logs every prefab name matching fx_/explosion/aoe
+        /// so we can refine the hardcoded FxFallbacks list. Only runs once per session
+        /// when DebugMode is on and the user first detonates.
+        /// </summary>
+        private static void LogDiscoveredFxPrefabs()
+        {
+            var zns = ZNetScene.instance;
+            if (zns == null || zns.m_prefabs == null)
+            {
+                MegaSkeletonsPlugin.Log("[Exploder] ZNetScene unavailable — skipping prefab discovery");
+                return;
+            }
+
+            var matches = new List<string>();
+            foreach (var p in zns.m_prefabs)
+            {
+                if (p == null) continue;
+                var name = p.name;
+                if (string.IsNullOrEmpty(name)) continue;
+                if (name.IndexOf("explosion", StringComparison.OrdinalIgnoreCase) >= 0
+                    || name.IndexOf("aoe", StringComparison.OrdinalIgnoreCase) >= 0
+                    || name.StartsWith("fx_", StringComparison.OrdinalIgnoreCase))
+                {
+                    matches.Add(name);
+                }
+            }
+            matches.Sort(StringComparer.OrdinalIgnoreCase);
+
+            MegaSkeletonsPlugin.Log($"[Exploder] Discovered {matches.Count} fx/explosion/aoe prefabs:");
+            foreach (var m in matches)
+                MegaSkeletonsPlugin.Log("  " + m);
         }
     }
 
