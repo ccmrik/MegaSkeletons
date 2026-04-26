@@ -16,7 +16,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.2.0";
+        public const string PluginVersion = "1.2.1";
 
         public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
@@ -646,13 +646,15 @@ namespace MegaSkeletons
 
         private static bool _prefabsDiscovered;
 
+        // Verified prefab names from runtime ZNetScene discovery (v1.2.0 debug dump).
+        // Each list is ordered: primary visual → fallbacks if user's install differs.
         private static readonly Dictionary<ExplosionFx, string[]> FxFallbacks = new Dictionary<ExplosionFx, string[]>
         {
-            [ExplosionFx.StaffEmbers] = new[] { "fx_StaffFireball_explosion", "staff_fireball_explosion", "fx_StaffFireball_attack", "fx_HimminAfl_aoe", "fx_himinafl_aoe", "fx_meteor" },
-            [ExplosionFx.Meteor]      = new[] { "fx_meteor", "fx_meteor_explode", "fx_meteor_aoe" },
-            [ExplosionFx.Bonemass]    = new[] { "bonemass_attack_aoe", "fx_bonemass_aoe", "BonemassAOE" },
-            [ExplosionFx.Lava]        = new[] { "bomb_lava_explosion", "fx_lava_explosion", "fx_fenring_cultist_lava_explosion", "fx_lava_burst" },
-            [ExplosionFx.Lightning]   = new[] { "fx_HimminAfl_aoe", "fx_himinafl_aoe", "fx_lightning_aoe", "fx_lightning_explosion" },
+            [ExplosionFx.StaffEmbers] = new[] { "fx_fireball_staff_explosion", "fx_shaman_fireball_expl", "charred_fireball_aoe" },
+            [ExplosionFx.Meteor]      = new[] { "fx_fader_meteorsmash", "Fader_MeteorSmash_AOE", "fx_goblinking_meteor_hit", "fx_fader_meteor_hit" },
+            [ExplosionFx.Bonemass]    = new[] { "bonemass_aoe", "fx_Bonemass_aoe_start" },
+            [ExplosionFx.Lava]        = new[] { "fx_lavabomb_explosion", "lavabomb_explosion", "fx_unstablelavarock_explosion", "fx_blobLava_explosion" },
+            [ExplosionFx.Lightning]   = new[] { "fx_redlightning_burst", "fx_chainlightning_spread", "fx_DvergerMage_Nova_ring", "aoe_nova" },
         };
 
         public static void TryDetonate(Player player)
