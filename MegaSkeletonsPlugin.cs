@@ -16,7 +16,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.2.3";
+        public const string PluginVersion = "1.3.0";
 
         public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
@@ -35,6 +35,10 @@ namespace MegaSkeletons
         // Skeleton Persistence
         public static ConfigEntry<bool> EnableSkeletonPersistence;
         public static ConfigEntry<float> SkeletonFollowRadius;
+
+        // Skeleton Sight (line-of-sight range)
+        public static ConfigEntry<bool> EnableSkeletonSight;
+        public static ConfigEntry<float> SkeletonSightMultiplier;
 
         // Skeleton Exploder
         public static ConfigEntry<bool> EnableSkeletonExploder;
@@ -90,6 +94,12 @@ namespace MegaSkeletons
                 new ConfigDescription("AOE damage radius around each detonating skeleton (metres)", new AcceptableValueRange<float>(1f, 100f)));
             ExploderExplosionType = Config.Bind("3. Skeleton Exploder", "ExplosionType", SkeletonExploder.ExplosionFx.StaffEmbers,
                 "Visual explosion effect. StaffEmbers mimics the Staff of Embers; Meteor/Bonemass/Lava/Lightning use other vanilla effects. Enable DebugMode to log every fx_/explosion/aoe prefab discovered at runtime so we can refine the list.");
+
+            // 4. Skeleton Sight — extend tamed skeleton view + alert range so they engage further away
+            EnableSkeletonSight = Config.Bind("4. Skeleton Sight", "Enable", true,
+                "Extend summoned skeleton line of sight + alert range so they spot and attack enemies further away");
+            SkeletonSightMultiplier = Config.Bind("4. Skeleton Sight", "SightMultiplier", 3f,
+                new ConfigDescription("Multiplier on view range and alert range (vanilla view ≈ 30m, 3x = 90m)", new AcceptableValueRange<float>(1f, 10f)));
 
             // 99. Debug — standardised section across all Mega mods (v1.1.0+)
             DebugMode = Config.Bind("99. Debug", "DebugMode", false,
@@ -194,6 +204,11 @@ namespace MegaSkeletons
         private bool _healthApplied;
         private float _healTimer;
 
+        // Cached vanilla view/alert ranges so the multiplier always applies to a clean baseline
+        // (capturing on Awake; -1 means "not yet captured")
+        private float _baseViewRange = -1f;
+        private float _baseAlertRange = -1f;
+
         // ZDO key to prevent HP stacking across respawns
         private static readonly int s_megaHpBuffed = "mega_hp_buffed".GetStableHashCode();
 
@@ -273,6 +288,27 @@ namespace MegaSkeletons
                             _character.SetHealth(newHp);
                         }
                     }
+                }
+            }
+
+            // Sight + alert range — extend so tamed skeletons engage further away.
+            // Baseline captured once from the prefab values, then re-applied each tick
+            // so live config edits and pheromone-tame transitions both stay in sync.
+            if (_monsterAI != null)
+            {
+                if (_baseViewRange < 0f) _baseViewRange = _monsterAI.m_viewRange;
+                if (_baseAlertRange < 0f) _baseAlertRange = _monsterAI.m_alertRange;
+
+                if (MegaSkeletonsPlugin.EnableSkeletonSight.Value)
+                {
+                    float sightMult = MegaSkeletonsPlugin.SkeletonSightMultiplier.Value;
+                    _monsterAI.m_viewRange = _baseViewRange * sightMult;
+                    _monsterAI.m_alertRange = _baseAlertRange * sightMult;
+                }
+                else
+                {
+                    _monsterAI.m_viewRange = _baseViewRange;
+                    _monsterAI.m_alertRange = _baseAlertRange;
                 }
             }
 
