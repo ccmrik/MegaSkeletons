@@ -16,7 +16,7 @@ namespace MegaSkeletons
     {
         public const string PluginGUID = "com.rik.megaskeletons";
         public const string PluginName = "Mega Skeletons";
-        public const string PluginVersion = "1.3.0";
+        public const string PluginVersion = "1.4.0";
 
         public static MegaSkeletonsPlugin Instance { get; private set; }
         internal static ManualLogSource _logger;
@@ -26,25 +26,24 @@ namespace MegaSkeletons
 
         // Skeleton Buffs
         public static ConfigEntry<bool> EnableSkeletonBuff;
-        public static ConfigEntry<float> SkeletonHealthMultiplier;
-        public static ConfigEntry<float> SkeletonHealPerSecond;
+        public static ConfigEntry<int> SkeletonHealthMultiplier;
+        public static ConfigEntry<int> SkeletonHealPerSecond;
         public static ConfigEntry<bool> EnableSkeletonSpeedMatch;
-        public static ConfigEntry<float> SkeletonSpeedMultiplier;
-        public static ConfigEntry<float> SkeletonAttackSpeedMultiplier;
+        public static ConfigEntry<int> SkeletonSpeedMultiplier;
 
         // Skeleton Persistence
         public static ConfigEntry<bool> EnableSkeletonPersistence;
-        public static ConfigEntry<float> SkeletonFollowRadius;
+        public static ConfigEntry<int> SkeletonFollowRadius;
 
         // Skeleton Sight (line-of-sight range)
         public static ConfigEntry<bool> EnableSkeletonSight;
-        public static ConfigEntry<float> SkeletonSightMultiplier;
+        public static ConfigEntry<int> SkeletonSightMultiplier;
 
         // Skeleton Exploder
         public static ConfigEntry<bool> EnableSkeletonExploder;
         public static ConfigEntry<KeyboardShortcut> ExploderHotkey;
-        public static ConfigEntry<float> ExploderDamageMultiplier;
-        public static ConfigEntry<float> ExploderAoeRadius;
+        public static ConfigEntry<int> ExploderDamageMultiplier;
+        public static ConfigEntry<int> ExploderAoeRadius;
         public static ConfigEntry<SkeletonExploder.ExplosionFx> ExploderExplosionType;
 
         // Debug
@@ -65,45 +64,49 @@ namespace MegaSkeletons
 
             // 1. Skeleton Buffs
             EnableSkeletonBuff = Config.Bind("1. Skeleton Buffs", "Enable", true,
-                "Buffs summoned skeletons from the Dead Raiser (health, speed, attack speed, heal over time)");
-            SkeletonHealthMultiplier = Config.Bind("1. Skeleton Buffs", "HealthMultiplier", 10f,
-                new ConfigDescription("Health multiplier for summoned skeletons (vanilla ≈ 40 HP)", new AcceptableValueRange<float>(1f, 100f)));
-            SkeletonHealPerSecond = Config.Bind("1. Skeleton Buffs", "HealPerSecond", 5f,
-                new ConfigDescription("HP healed per second for summoned skeletons (0 = disabled)", new AcceptableValueRange<float>(0f, 100f)));
+                "Buffs summoned skeletons from the Dead Raiser (health, speed, heal over time)");
+            SkeletonHealthMultiplier = Config.Bind("1. Skeleton Buffs", "HealthMultiplier", 10,
+                new ConfigDescription("Health multiplier for summoned skeletons (vanilla ≈ 40 HP)", new AcceptableValueRange<int>(1, 10)));
+            SkeletonHealPerSecond = Config.Bind("1. Skeleton Buffs", "HealPerSecond", 5,
+                new ConfigDescription("HP healed per second for summoned skeletons (0 = disabled)", new AcceptableValueRange<int>(0, 10)));
             EnableSkeletonSpeedMatch = Config.Bind("1. Skeleton Buffs", "SpeedMatch", true,
                 "Match summoned skeleton walk/run speed to the player so they keep up");
-            SkeletonSpeedMultiplier = Config.Bind("1. Skeleton Buffs", "SpeedMultiplier", 1.5f,
-                new ConfigDescription("Speed multiplier on top of player speed matching (1.5 = 50% faster than player, helps them keep up during sprint)", new AcceptableValueRange<float>(1f, 5f)));
-            SkeletonAttackSpeedMultiplier = Config.Bind("1. Skeleton Buffs", "AttackSpeedMultiplier", 1.5f,
-                new ConfigDescription("Attack speed multiplier for summoned skeletons (1 = vanilla, 2 = double speed). Affects both animation and attack timing.", new AcceptableValueRange<float>(1f, 5f)));
+            SkeletonSpeedMultiplier = Config.Bind("1. Skeleton Buffs", "SpeedMultiplier", 2,
+                new ConfigDescription("Speed multiplier on top of player speed matching (2 = double player speed so they keep up during sprint)", new AcceptableValueRange<int>(1, 2)));
 
             // 2. Skeleton Persistence
             EnableSkeletonPersistence = Config.Bind("2. Skeleton Persistence", "Enable", true,
                 "Summoned skeletons follow you through portals and dungeon entrances/exits");
-            SkeletonFollowRadius = Config.Bind("2. Skeleton Persistence", "FollowRadius", 30f,
-                new ConfigDescription("Max distance from player for skeletons to be teleported with you", new AcceptableValueRange<float>(5f, 100f)));
+            SkeletonFollowRadius = Config.Bind("2. Skeleton Persistence", "FollowRadius", 30,
+                new ConfigDescription("Max distance from player (metres) for skeletons to be teleported with you", new AcceptableValueRange<int>(5, 100)));
 
             // 3. Skeleton Exploder — remote-detonate every controlled skeleton in follow radius
             EnableSkeletonExploder = Config.Bind("3. Skeleton Exploder", "Enable", true,
-                "Press the hotkey to detonate every tamed skeleton in follow radius (each leaves an AOE explosion)");
+                "Press the hotkey to detonate every tamed skeleton in follow radius (each leaves an AOE explosion + lingering housefire)");
             ExploderHotkey = Config.Bind("3. Skeleton Exploder", "Hotkey", new KeyboardShortcut(KeyCode.KeypadEnter),
                 "Hotkey to trigger detonation of all controlled skeletons");
-            ExploderDamageMultiplier = Config.Bind("3. Skeleton Exploder", "DamageMultiplier", 1f,
-                new ConfigDescription("Damage multiplier on top of the 200-base elemental split (40 fire/poison/spirit/lightning/frost). 1x = 200 elemental, 10x = 2000.", new AcceptableValueRange<float>(1f, 10f)));
-            ExploderAoeRadius = Config.Bind("3. Skeleton Exploder", "AoeRadius", 10f,
-                new ConfigDescription("AOE damage radius around each detonating skeleton (metres)", new AcceptableValueRange<float>(1f, 100f)));
+            ExploderDamageMultiplier = Config.Bind("3. Skeleton Exploder", "DamageMultiplier", 1,
+                new ConfigDescription("Damage multiplier on top of the 200-base elemental split (40 fire/poison/spirit/lightning/frost + 200 chop + 200 pickaxe). 1x = baseline, 10x = ten times.", new AcceptableValueRange<int>(1, 10)));
+            ExploderAoeRadius = Config.Bind("3. Skeleton Exploder", "AoeRadius", 10,
+                new ConfigDescription("AOE damage radius around each detonating skeleton (metres)", new AcceptableValueRange<int>(1, 10)));
             ExploderExplosionType = Config.Bind("3. Skeleton Exploder", "ExplosionType", SkeletonExploder.ExplosionFx.StaffEmbers,
                 "Visual explosion effect. StaffEmbers mimics the Staff of Embers; Meteor/Bonemass/Lava/Lightning use other vanilla effects. Enable DebugMode to log every fx_/explosion/aoe prefab discovered at runtime so we can refine the list.");
 
             // 4. Skeleton Sight — extend tamed skeleton view + alert range so they engage further away
             EnableSkeletonSight = Config.Bind("4. Skeleton Sight", "Enable", true,
                 "Extend summoned skeleton line of sight + alert range so they spot and attack enemies further away");
-            SkeletonSightMultiplier = Config.Bind("4. Skeleton Sight", "SightMultiplier", 3f,
-                new ConfigDescription("Multiplier on view range and alert range (vanilla view ≈ 30m, 3x = 90m)", new AcceptableValueRange<float>(1f, 10f)));
+            SkeletonSightMultiplier = Config.Bind("4. Skeleton Sight", "SightMultiplier", 3,
+                new ConfigDescription("Multiplier on view range and alert range (vanilla view ≈ 30m, 3x = 90m)", new AcceptableValueRange<int>(1, 10)));
 
             // 99. Debug — standardised section across all Mega mods (v1.1.0+)
             DebugMode = Config.Bind("99. Debug", "DebugMode", false,
                 "Enable verbose debug logging to BepInEx console/log");
+
+            // Sweep orphan keys/sections left behind by previous versions
+            // (e.g. AttackSpeedMultiplier removed in v1.4.0). Runs AFTER every Bind
+            // so the snapshot is complete, BEFORE the watcher attaches so we don't
+            // trigger a phantom Reload.
+            ConfigPruner.Prune(Config, _logger);
 
             // Config file watcher for live reload
             SetupConfigWatcher();
@@ -195,7 +198,6 @@ namespace MegaSkeletons
     /// - Health multiplier (applied once on first tamed detection, via ZDO)
     /// - Heal over time (continuous HP regen)
     /// - Speed matching to player walk/run speed (continuous)
-    /// - Attack animation speed multiplier (continuous during attacks)
     /// </summary>
     public class SkeletonBuff : MonoBehaviour
     {
@@ -326,46 +328,6 @@ namespace MegaSkeletons
                 _character.m_swimAcceleration = player.m_swimAcceleration;
                 _character.m_swimTurnSpeed = player.m_swimTurnSpeed;
             }
-
-            // Attack speed is handled by Attack_Start_SkeletonSpeed_Patch (modifies m_speedFactor)
-        }
-    }
-
-    // ==================== SKELETON ATTACK SPEED ====================
-
-    /// <summary>
-    /// Boosts tamed skeleton attack speed by modifying Attack.m_speedFactor after the
-    /// attack starts. This scales both the animation playback and the internal attack
-    /// timer so damage, cooldown, and visuals all stay in sync.
-    /// </summary>
-    [HarmonyPatch(typeof(Attack), nameof(Attack.Start))]
-    public static class Attack_Start_SkeletonSpeed_Patch
-    {
-        [HarmonyPostfix]
-        public static void Postfix(Attack __instance, bool __result)
-        {
-            if (!__result) return;
-            if (!MegaSkeletonsPlugin.EnableSkeletonBuff.Value) return;
-
-            float mult = MegaSkeletonsPlugin.SkeletonAttackSpeedMultiplier.Value;
-            if (mult <= 1f) return;
-
-            // m_character is private — access via Traverse
-            var character = Traverse.Create(__instance).Field("m_character").GetValue<Character>();
-            if (character == null || !character.IsTamed()) return;
-
-            string objName = character.gameObject.name.ToLower();
-            if (!objName.Contains("skeleton") && !objName.Contains("skelett")) return;
-
-            // Scale the speed factor that Attack.Update() uses to advance the attack timer
-            __instance.m_speedFactor *= mult;
-
-            // Re-set animation speed to match (Start() already called SetSpeed with the original value)
-            var zanim = Traverse.Create(__instance).Field("m_zanim").GetValue<ZSyncAnimation>();
-            if (zanim != null)
-                zanim.SetSpeed(__instance.m_speedFactor);
-
-            MegaSkeletonsPlugin.Log($"[SkeletonBuff] Attack speed boosted: speedFactor={__instance.m_speedFactor:F2} (x{mult})");
         }
     }
 
@@ -669,9 +631,12 @@ namespace MegaSkeletons
     /// Remote detonation of every tamed skeleton in follow radius.
     /// Each skeleton vanishes and leaves an AOE explosion at its position dealing
     /// configurable elemental damage (40-base split across fire/poison/spirit/
-    /// lightning/frost, scaled by DamageMultiplier 1-10x). Vanilla DoT status
-    /// effects (Burning, Poisoned, etc) trigger naturally from the elemental
-    /// values via Character.Damage().
+    /// lightning/frost + chop + pickaxe, scaled by DamageMultiplier 1-10x). Hits
+    /// hostile creatures, trees, rocks, mining nodes and world structures —
+    /// player-built pieces and pickables (berries etc) are skipped. A vanilla
+    /// HouseFire is spawned at each detonation point for ongoing burn damage
+    /// and the visual cue. Vanilla DoT status effects (Burning, Poisoned, etc)
+    /// trigger naturally from the elemental values via Character.Damage().
     /// </summary>
     public static class SkeletonExploder
     {
@@ -685,6 +650,10 @@ namespace MegaSkeletons
         }
 
         private static bool _prefabsDiscovered;
+
+        // Cached HouseFire prefab — vanilla `fire_house` (or fallback via Cinder.m_houseFirePrefab).
+        private static GameObject _houseFirePrefab;
+        private static bool _houseFireSearchDone;
 
         // Verified prefab names from runtime ZNetScene discovery (v1.2.0 debug dump).
         // Each list is ordered: primary visual → fallbacks if user's install differs.
@@ -732,13 +701,14 @@ namespace MegaSkeletons
                 if (sk == null) continue;
                 Vector3 pos = sk.transform.position;
 
-                // Spawn the visual + apply outward AOE first; ApplyAoeDamage
-                // skips tamed creatures so the skeleton itself is safe from
-                // its own blast — we then send a lethal HitData so Valheim's
-                // OnDeath path runs the proper skeleton death animation,
-                // ragdoll, and audio (rather than yanking the netview which
-                // just makes the skeleton vanish silently).
+                // Spawn the visual + housefire + apply outward AOE first;
+                // ApplyAoeDamage skips tamed creatures so the skeleton itself
+                // is safe from its own blast — we then send a lethal HitData
+                // so Valheim's OnDeath path runs the proper skeleton death
+                // animation, ragdoll, and audio (rather than yanking the
+                // netview which just makes the skeleton vanish silently).
                 SpawnExplosionFx(pos, fxType);
+                SpawnHouseFire(pos);
                 ApplyAoeDamage(pos, aoeRadius, mult, player);
 
                 var nv = sk.GetComponent<ZNetView>();
@@ -804,50 +774,141 @@ namespace MegaSkeletons
 
         private static void ApplyAoeDamage(Vector3 center, float radius, float mult, Player attacker)
         {
-            // 200 base damage split evenly across 5 elements = 40 each, then multiplier
+            // 200 base damage split evenly across 5 elements = 40 each, then multiplier.
+            // Plus 200x chop and pickaxe so trees and rock nodes actually take damage —
+            // elemental alone bounces off them via vanilla DamageModifiers.
             float perElement = 40f * mult;
+            float perPhys    = 200f * mult;
             ZDOID attackerId = attacker != null ? attacker.GetZDOID() : ZDOID.None;
 
             var hits = Physics.OverlapSphere(center, radius);
             var damagedCharacters = new HashSet<int>();
             var damagedWnt = new HashSet<int>();
+            var damagedTree = new HashSet<int>();
+            var damagedTreeLog = new HashSet<int>();
+            var damagedMineRock5 = new HashSet<int>();
+            var damagedMineRock = new HashSet<int>();
+            var damagedDestructible = new HashSet<int>();
 
             foreach (var col in hits)
             {
                 if (col == null) continue;
 
-                // Damage characters (skip player + tamed allies)
+                // Hard skip: anything pickable (cloudberries, blueberries, raspberries,
+                // vineberries, mushrooms, dandelions, thistle, etc). Per Milord's spec
+                // explosions must never strip pickable resources.
+                if (col.GetComponentInParent<Pickable>() != null) continue;
+
+                // Damage characters (skip player + tamed allies + already-dead)
                 var character = col.GetComponentInParent<Character>();
                 if (character != null && !character.IsDead() && character != attacker && !character.IsTamed())
                 {
                     int id = character.GetInstanceID();
                     if (damagedCharacters.Add(id))
                     {
-                        var hit = BuildElementalHit(perElement, center, character.transform.position, attackerId);
+                        var hit = BuildElementalHit(perElement, perPhys, center, character.transform.position, attackerId);
                         try { character.Damage(hit); }
                         catch (Exception ex) { MegaSkeletonsPlugin.Log($"[Exploder] Character.Damage failed: {ex.Message}"); }
                     }
                     continue;
                 }
 
-                // Damage structures (WearNTear)
+                // Damage world structures (WearNTear) — skip player-built pieces
                 var wnt = col.GetComponentInParent<WearNTear>();
                 if (wnt != null)
                 {
                     int id = wnt.GetInstanceID();
                     if (damagedWnt.Add(id))
                     {
-                        var hit = BuildElementalHit(perElement, center, wnt.transform.position, attackerId);
-                        try { wnt.Damage(hit); }
-                        catch (Exception ex) { MegaSkeletonsPlugin.Log($"[Exploder] WearNTear.Damage failed: {ex.Message}"); }
+                        var piece = wnt.GetComponent<Piece>();
+                        if (piece != null && piece.IsPlacedByPlayer())
+                        {
+                            // Player-built — leave it alone
+                        }
+                        else
+                        {
+                            var hit = BuildElementalHit(perElement, perPhys, center, wnt.transform.position, attackerId);
+                            try { wnt.Damage(hit); }
+                            catch (Exception ex) { MegaSkeletonsPlugin.Log($"[Exploder] WearNTear.Damage failed: {ex.Message}"); }
+                        }
+                    }
+                    continue;
+                }
+
+                // Standing trees
+                var tree = col.GetComponentInParent<TreeBase>();
+                if (tree != null)
+                {
+                    int id = tree.GetInstanceID();
+                    if (damagedTree.Add(id))
+                    {
+                        var hit = BuildElementalHit(perElement, perPhys, center, tree.transform.position, attackerId);
+                        try { tree.Damage(hit); }
+                        catch (Exception ex) { MegaSkeletonsPlugin.Log($"[Exploder] TreeBase.Damage failed: {ex.Message}"); }
+                    }
+                    continue;
+                }
+
+                // Felled tree logs (need a second chop to break into wood)
+                var tlog = col.GetComponentInParent<TreeLog>();
+                if (tlog != null)
+                {
+                    int id = tlog.GetInstanceID();
+                    if (damagedTreeLog.Add(id))
+                    {
+                        var hit = BuildElementalHit(perElement, perPhys, center, tlog.transform.position, attackerId);
+                        try { tlog.Damage(hit); }
+                        catch (Exception ex) { MegaSkeletonsPlugin.Log($"[Exploder] TreeLog.Damage failed: {ex.Message}"); }
+                    }
+                    continue;
+                }
+
+                // Multi-area mining nodes (copper, silver, iron deposits etc)
+                var rock5 = col.GetComponentInParent<MineRock5>();
+                if (rock5 != null)
+                {
+                    int id = rock5.GetInstanceID();
+                    if (damagedMineRock5.Add(id))
+                    {
+                        var hit = BuildElementalHit(perElement, perPhys, center, rock5.transform.position, attackerId);
+                        try { rock5.Damage(hit); }
+                        catch (Exception ex) { MegaSkeletonsPlugin.Log($"[Exploder] MineRock5.Damage failed: {ex.Message}"); }
+                    }
+                    continue;
+                }
+
+                // Single-piece mining nodes (tin, obsidian, small rocks)
+                var rock = col.GetComponentInParent<MineRock>();
+                if (rock != null)
+                {
+                    int id = rock.GetInstanceID();
+                    if (damagedMineRock.Add(id))
+                    {
+                        var hit = BuildElementalHit(perElement, perPhys, center, rock.transform.position, attackerId);
+                        try { rock.Damage(hit); }
+                        catch (Exception ex) { MegaSkeletonsPlugin.Log($"[Exploder] MineRock.Damage failed: {ex.Message}"); }
+                    }
+                    continue;
+                }
+
+                // Generic Destructibles (small rocks, branches, scattered debris)
+                var dest = col.GetComponentInParent<Destructible>();
+                if (dest != null)
+                {
+                    int id = dest.GetInstanceID();
+                    if (damagedDestructible.Add(id))
+                    {
+                        var hit = BuildElementalHit(perElement, perPhys, center, dest.transform.position, attackerId);
+                        try { dest.Damage(hit); }
+                        catch (Exception ex) { MegaSkeletonsPlugin.Log($"[Exploder] Destructible.Damage failed: {ex.Message}"); }
                     }
                 }
             }
 
-            MegaSkeletonsPlugin.Log($"[Exploder] AOE @ {center} r={radius}m: {damagedCharacters.Count} character(s), {damagedWnt.Count} structure(s)");
+            MegaSkeletonsPlugin.Log($"[Exploder] AOE @ {center} r={radius}m: chars={damagedCharacters.Count} wnt={damagedWnt.Count} tree={damagedTree.Count} log={damagedTreeLog.Count} rock5={damagedMineRock5.Count} rock={damagedMineRock.Count} dest={damagedDestructible.Count}");
         }
 
-        private static HitData BuildElementalHit(float perElement, Vector3 center, Vector3 target, ZDOID attackerId)
+        private static HitData BuildElementalHit(float perElement, float perPhys, Vector3 center, Vector3 target, ZDOID attackerId)
         {
             var hit = new HitData();
             hit.m_point = target;
@@ -860,7 +921,80 @@ namespace MegaSkeletons
             hit.m_damage.m_spirit = perElement;
             hit.m_damage.m_lightning = perElement;
             hit.m_damage.m_frost = perElement;
+            // Chop/Pickaxe so trees and rock nodes actually take damage —
+            // elemental alone is filtered to zero by their DamageModifiers.
+            hit.m_damage.m_chop = perPhys;
+            hit.m_damage.m_pickaxe = perPhys;
             return hit;
+        }
+
+        // ---- HouseFire visual + lingering burn ---------------------------------
+
+        private static void SpawnHouseFire(Vector3 pos)
+        {
+            try
+            {
+                if (!_houseFireSearchDone) FindHouseFirePrefab();
+                if (_houseFirePrefab == null)
+                {
+                    MegaSkeletonsPlugin.Log("[Exploder] HouseFire prefab not found — skipping fire spawn");
+                    return;
+                }
+
+                UnityEngine.Object.Instantiate(_houseFirePrefab, pos + Vector3.up * 0.1f, Quaternion.identity);
+                MegaSkeletonsPlugin.Log($"[Exploder] HouseFire spawned at {pos}");
+            }
+            catch (Exception ex)
+            {
+                MegaSkeletonsPlugin.Log($"[Exploder] SpawnHouseFire failed: {ex.Message}");
+            }
+        }
+
+        private static void FindHouseFirePrefab()
+        {
+            _houseFireSearchDone = true;
+            try
+            {
+                var zns = ZNetScene.instance;
+                if (zns == null) return;
+
+                // Try canonical names first
+                string[] knownNames = { "fire_house", "HouseFire", "houseFire", "fx_fire_house" };
+                foreach (var name in knownNames)
+                {
+                    var prefab = zns.GetPrefab(name);
+                    if (prefab != null)
+                    {
+                        _houseFirePrefab = prefab;
+                        MegaSkeletonsPlugin.Log($"[Exploder] HouseFire prefab cached via name '{name}'");
+                        return;
+                    }
+                }
+
+                // Fallback: find any Cinder prefab and grab its m_houseFirePrefab field
+                var cinderField = typeof(Cinder).GetField("m_houseFirePrefab",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                if (cinderField != null)
+                {
+                    foreach (var prefab in zns.m_prefabs)
+                    {
+                        if (prefab == null) continue;
+                        var cinder = prefab.GetComponent<Cinder>();
+                        if (cinder == null) continue;
+                        var hf = cinderField.GetValue(cinder) as GameObject;
+                        if (hf != null)
+                        {
+                            _houseFirePrefab = hf;
+                            MegaSkeletonsPlugin.Log($"[Exploder] HouseFire prefab cached via Cinder fallback ({prefab.name})");
+                            return;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MegaSkeletonsPlugin.Log($"[Exploder] FindHouseFirePrefab failed: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -917,6 +1051,121 @@ namespace MegaSkeletons
             if (__exception is NullReferenceException)
                 return null;
             return __exception;
+        }
+    }
+
+    // ==================== CONFIG PRUNER ====================
+
+    /// <summary>
+    /// Inline INI sweeper. Walks the bound config snapshot and rewrites the
+    /// raw cfg without any orphan sections or keys (BepInEx never deletes them
+    /// itself — left over content snowballs across versions). Run AFTER every
+    /// Bind() and BEFORE the file-watcher attaches so we don't trigger a
+    /// phantom reload mid-sweep.
+    /// </summary>
+    public static class ConfigPruner
+    {
+        public static int Prune(ConfigFile cfg, ManualLogSource log = null)
+        {
+            if (cfg == null) return 0;
+            string path = cfg.ConfigFilePath;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return 0;
+
+            var bound = new HashSet<string>(StringComparer.Ordinal);
+            var boundSections = new HashSet<string>(StringComparer.Ordinal);
+            try
+            {
+                foreach (var def in cfg.Keys)
+                {
+                    bound.Add(def.Section + "\0" + def.Key);
+                    boundSections.Add(def.Section);
+                }
+            }
+            catch (Exception ex)
+            {
+                log?.LogWarning($"[ConfigPruner] Couldn't enumerate bound entries: {ex.Message}");
+                return 0;
+            }
+            if (boundSections.Count == 0) return 0;
+
+            string[] inLines;
+            try { inLines = File.ReadAllLines(path); }
+            catch (Exception ex)
+            {
+                log?.LogWarning($"[ConfigPruner] Read failed: {ex.Message}");
+                return 0;
+            }
+
+            var outLines = new List<string>(inLines.Length);
+            string currentSection = null;
+            bool currentSectionKeep = true;
+            int droppedSections = 0, droppedKeys = 0;
+
+            for (int i = 0; i < inLines.Length; i++)
+            {
+                var line = inLines[i];
+                var trimmed = line.Trim();
+
+                if (trimmed.Length >= 2 && trimmed[0] == '[' && trimmed[trimmed.Length - 1] == ']')
+                {
+                    currentSection = trimmed.Substring(1, trimmed.Length - 2).Trim();
+                    currentSectionKeep = boundSections.Contains(currentSection);
+                    if (!currentSectionKeep)
+                    {
+                        droppedSections++;
+                        TrimTrailingBlanksAndComments(outLines);
+                        continue;
+                    }
+                    outLines.Add(line);
+                    continue;
+                }
+
+                if (!currentSectionKeep) continue;
+
+                int eq = trimmed.IndexOf('=');
+                bool isKeyLine = eq > 0 && trimmed[0] != '#' && trimmed[0] != ';';
+                if (isKeyLine && currentSection != null)
+                {
+                    string key = trimmed.Substring(0, eq).Trim();
+                    if (!bound.Contains(currentSection + "\0" + key))
+                    {
+                        droppedKeys++;
+                        TrimTrailingBlanksAndComments(outLines);
+                        continue;
+                    }
+                }
+                outLines.Add(line);
+            }
+
+            if (droppedSections == 0 && droppedKeys == 0) return 0;
+
+            while (outLines.Count > 0 && outLines[outLines.Count - 1].Trim().Length == 0)
+                outLines.RemoveAt(outLines.Count - 1);
+            outLines.Add(string.Empty);
+
+            try
+            {
+                File.WriteAllLines(path, outLines);
+                log?.LogInfo($"[ConfigPruner] {Path.GetFileName(path)}: dropped {droppedSections} orphan section(s), {droppedKeys} orphan key(s)");
+            }
+            catch (Exception ex)
+            {
+                log?.LogWarning($"[ConfigPruner] Write failed: {ex.Message}");
+                return 0;
+            }
+            return droppedSections + droppedKeys;
+        }
+
+        private static void TrimTrailingBlanksAndComments(List<string> lines)
+        {
+            while (lines.Count > 0)
+            {
+                var last = lines[lines.Count - 1].TrimStart();
+                if (last.Length == 0 || last[0] == '#' || last[0] == ';')
+                    lines.RemoveAt(lines.Count - 1);
+                else
+                    break;
+            }
         }
     }
 }
